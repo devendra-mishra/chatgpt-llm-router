@@ -1,0 +1,801 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TIR Platform - Visual Workflow Diagrams</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 15px 35px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #2d3748 0%, #4a5568 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .header h1 {
+            margin: 0;
+            font-size: 2.5em;
+            font-weight: 300;
+        }
+
+        .header p {
+            margin: 10px 0 0 0;
+            font-size: 1.2em;
+            opacity: 0.9;
+        }
+
+        .diagram-section {
+            padding: 40px;
+            border-bottom: 1px solid #e2e8f0;
+        }
+
+        .diagram-section:last-child {
+            border-bottom: none;
+        }
+
+        .diagram-title {
+            font-size: 1.8em;
+            color: #2d3748;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+        }
+
+        .diagram-title::before {
+            content: "🎯";
+            margin-right: 10px;
+        }
+
+        .animated-diagram {
+            position: relative;
+            background: #f7fafc;
+            border-radius: 10px;
+            padding: 30px;
+            margin: 20px 0;
+            overflow: hidden;
+        }
+
+        .flow-container {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 20px;
+        }
+
+        .flow-step {
+            background: white;
+            border: 2px solid #e2e8f0;
+            border-radius: 8px;
+            padding: 15px 20px;
+            min-width: 120px;
+            text-align: center;
+            position: relative;
+            transition: all 0.3s ease;
+            cursor: pointer;
+        }
+
+        .flow-step:hover {
+            border-color: #4299e1;
+            transform: translateY(-5px);
+            box-shadow: 0 10px 25px rgba(66, 153, 225, 0.15);
+        }
+
+        .flow-step.active {
+            background: linear-gradient(135deg, #4299e1, #3182ce);
+            color: white;
+            border-color: #3182ce;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+            100% { transform: scale(1); }
+        }
+
+        .flow-arrow {
+            font-size: 1.5em;
+            color: #4299e1;
+            animation: flow 2s infinite;
+        }
+
+        @keyframes flow {
+            0%, 100% { transform: translateX(0); opacity: 0.7; }
+            50% { transform: translateX(5px); opacity: 1; }
+        }
+
+        .gpu-tier {
+            display: inline-block;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-weight: bold;
+            margin: 5px;
+            transition: all 0.3s ease;
+        }
+
+        .gpu-h100 {
+            background: linear-gradient(135deg, #f093fb, #f5576c);
+            color: white;
+        }
+
+        .gpu-a100 {
+            background: linear-gradient(135deg, #4facfe, #00f2fe);
+            color: white;
+        }
+
+        .gpu-l40s {
+            background: linear-gradient(135deg, #43e97b, #38f9d7);
+            color: #2d3748;
+        }
+
+        .metrics-box {
+            background: white;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            padding: 15px;
+            margin: 10px;
+            text-align: center;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .metric-value {
+            font-size: 2em;
+            font-weight: bold;
+            color: #4299e1;
+        }
+
+        .metric-label {
+            color: #718096;
+            font-size: 0.9em;
+            margin-top: 5px;
+        }
+
+        .deployment-phase {
+            background: white;
+            border-left: 4px solid #4299e1;
+            margin: 15px 0;
+            padding: 20px;
+            border-radius: 0 8px 8px 0;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            transition: all 0.3s ease;
+        }
+
+        .deployment-phase:hover {
+            transform: translateX(10px);
+            border-left-color: #3182ce;
+        }
+
+        .phase-number {
+            display: inline-block;
+            width: 30px;
+            height: 30px;
+            background: #4299e1;
+            color: white;
+            border-radius: 50%;
+            text-align: center;
+            line-height: 30px;
+            font-weight: bold;
+            margin-right: 15px;
+        }
+
+        .control-panel {
+            background: #2d3748;
+            color: white;
+            padding: 20px;
+            border-radius: 10px;
+            margin: 20px 0;
+            text-align: center;
+        }
+
+        .control-btn {
+            background: #4299e1;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            margin: 5px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .control-btn:hover {
+            background: #3182ce;
+            transform: translateY(-2px);
+        }
+
+        .fallback-path {
+            position: relative;
+            display: flex;
+            align-items: center;
+            margin: 20px 0;
+        }
+
+        .fallback-arrow {
+            font-size: 2em;
+            color: #e53e3e;
+            margin: 0 15px;
+            animation: bounce 1s infinite;
+        }
+
+        @keyframes bounce {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-5px); }
+        }
+
+        .explanation-box {
+            background: #edf2f7;
+            border-left: 4px solid #4299e1;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 0 8px 8px 0;
+        }
+
+        .code-snippet {
+            background: #2d3748;
+            color: #e2e8f0;
+            padding: 20px;
+            border-radius: 8px;
+            font-family: 'Courier New', monospace;
+            margin: 15px 0;
+            overflow-x: auto;
+        }
+
+        .highlight {
+            background: #ffd700;
+            padding: 2px 4px;
+            border-radius: 3px;
+            color: #2d3748;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🚀 TIR Platform Visual Workflow</h1>
+            <p>Interactive Diagrams for Understanding & Presentation</p>
+        </div>
+
+        <!-- Request Journey Flow -->
+        <div class="diagram-section">
+            <div class="diagram-title">Request Journey Flow</div>
+
+            <div class="control-panel">
+                <button class="control-btn" onclick="animateRequestFlow()">▶️ Animate Request Flow</button>
+                <button class="control-btn" onclick="resetAnimation()">🔄 Reset</button>
+            </div>
+
+            <div class="animated-diagram">
+                <div class="flow-container" id="requestFlow">
+                    <div class="flow-step" id="step1">
+                        <div>📱</div>
+                        <div><strong>Client Request</strong></div>
+                        <div style="font-size: 0.9em; color: #718096;">HTTPS POST</div>
+                    </div>
+                    <div class="flow-arrow">→</div>
+                    <div class="flow-step" id="step2">
+                        <div>🛡️</div>
+                        <div><strong>kgateway</strong></div>
+                        <div style="font-size: 0.9em; color: #718096;">TLS + Auth</div>
+                    </div>
+                    <div class="flow-arrow">→</div>
+                    <div class="flow-step" id="step3">
+                        <div>🔍</div>
+                        <div><strong>Classifier</strong></div>
+                        <div style="font-size: 0.9em; color: #718096;">Add Headers</div>
+                    </div>
+                    <div class="flow-arrow">→</div>
+                    <div class="flow-step" id="step4">
+                        <div>🛣️</div>
+                        <div><strong>HTTPRoute</strong></div>
+                        <div style="font-size: 0.9em; color: #718096;">Select Pool</div>
+                    </div>
+                    <div class="flow-arrow">→</div>
+                    <div class="flow-step" id="step5">
+                        <div>🎯</div>
+                        <div><strong>EPP</strong></div>
+                        <div style="font-size: 0.9em; color: #718096;">Score Endpoints</div>
+                    </div>
+                    <div class="flow-arrow">→</div>
+                    <div class="flow-step" id="step6">
+                        <div>🖥️</div>
+                        <div><strong>vLLM Pod</strong></div>
+                        <div style="font-size: 0.9em; color: #718096;">Process Request</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="explanation-box">
+                <strong>Key Headers Added by Classifier:</strong>
+                <div class="code-snippet">
+x-inference-model: llama-3.1-8b<br>
+x-serving-class: premium-realtime<br>
+x-context-class: standard<br>
+x-overflow-allowed: true
+                </div>
+            </div>
+        </div>
+
+        <!-- GPU Tier Routing -->
+        <div class="diagram-section">
+            <div class="diagram-title">GPU Tier Routing Strategy</div>
+
+            <div class="control-panel">
+                <button class="control-btn" onclick="demonstrateRouting('premium')">🔥 Premium Route</button>
+                <button class="control-btn" onclick="demonstrateRouting('standard')">⚖️ Standard Route</button>
+                <button class="control-btn" onclick="demonstrateRouting('economy')">💰 Economy Route</button>
+                <button class="control-btn" onclick="demonstrateRouting('longctx')">📄 Long Context</button>
+            </div>
+
+            <div class="animated-diagram">
+                <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 30px; margin-bottom: 30px;">
+                    <div class="gpu-tier gpu-h100" id="h100-tier">
+                        <div style="font-size: 1.2em; margin-bottom: 10px;">🔥 H100 Premium</div>
+                        <div class="metrics-box">
+                            <div class="metric-value">&lt;100ms</div>
+                            <div class="metric-label">P95 Latency</div>
+                        </div>
+                        <div class="metrics-box">
+                            <div class="metric-value">500+</div>
+                            <div class="metric-label">RPS</div>
+                        </div>
+                    </div>
+
+                    <div class="gpu-tier gpu-a100" id="a100-tier">
+                        <div style="font-size: 1.2em; margin-bottom: 10px;">⚖️ A100 Standard</div>
+                        <div class="metrics-box">
+                            <div class="metric-value">&lt;200ms</div>
+                            <div class="metric-label">P95 Latency</div>
+                        </div>
+                        <div class="metrics-box">
+                            <div class="metric-value">300+</div>
+                            <div class="metric-label">RPS</div>
+                        </div>
+                    </div>
+
+                    <div class="gpu-tier gpu-l40s" id="l40s-tier">
+                        <div style="font-size: 1.2em; margin-bottom: 10px;">💰 L40S Economy</div>
+                        <div class="metrics-box">
+                            <div class="metric-value">&lt;800ms</div>
+                            <div class="metric-label">P95 Latency</div>
+                        </div>
+                        <div class="metrics-box">
+                            <div class="metric-value">150+</div>
+                            <div class="metric-label">RPS</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="routing-demo" style="text-align: center; padding: 20px; background: white; border-radius: 8px; margin-top: 20px;">
+                    <div style="font-size: 1.1em; color: #718096;">Click buttons above to see routing decisions</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Deployment Phases -->
+        <div class="diagram-section">
+            <div class="diagram-title">Deployment Phases</div>
+
+            <div class="control-panel">
+                <button class="control-btn" onclick="animateDeployment()">🚀 Animate Deployment</button>
+                <button class="control-btn" onclick="resetDeployment()">🔄 Reset</button>
+            </div>
+
+            <div class="animated-diagram">
+                <div class="deployment-phase" id="phase0">
+                    <span class="phase-number">0</span>
+                    <strong>Foundation Setup</strong>
+                    <div style="margin-top: 10px; color: #718096;">Namespace, labels, and base configuration</div>
+                    <div class="code-snippet" style="margin-top: 10px;">kubectl apply -f deployments/00-namespace-and-labels.yaml</div>
+                </div>
+
+                <div class="deployment-phase" id="phase1">
+                    <span class="phase-number">1</span>
+                    <strong>Model Lifecycle</strong>
+                    <div style="margin-top: 10px; color: #718096;">ModelBooster and ModelServing resources</div>
+                    <div class="code-snippet" style="margin-top: 10px;">kubectl apply -f deployments/10-model-lifecycle.yaml</div>
+                </div>
+
+                <div class="deployment-phase" id="phase2">
+                    <span class="phase-number">2</span>
+                    <strong>Inference Pools</strong>
+                    <div style="margin-top: 10px; color: #718096;">GPU-tier specific pool creation</div>
+                    <div class="code-snippet" style="margin-top: 10px;">kubectl apply -f deployments/20-inference-pools.yaml</div>
+                </div>
+
+                <div class="deployment-phase" id="phase3">
+                    <span class="phase-number">3</span>
+                    <strong>Model Abstraction</strong>
+                    <div style="margin-top: 10px; color: #718096;">Client-facing model interfaces</div>
+                    <div class="code-snippet" style="margin-top: 10px;">kubectl apply -f deployments/30-inference-models.yaml</div>
+                </div>
+
+                <div class="deployment-phase" id="phase4">
+                    <span class="phase-number">4</span>
+                    <strong>EPP Services</strong>
+                    <div style="margin-top: 10px; color: #718096;">Endpoint picker deployment and config</div>
+                    <div class="code-snippet" style="margin-top: 10px;">kubectl apply -f deployments/40-epp-deployments.yaml</div>
+                </div>
+
+                <div class="deployment-phase" id="phase5">
+                    <span class="phase-number">5</span>
+                    <strong>Gateway & Security</strong>
+                    <div style="margin-top: 10px; color: #718096;">Authentication and request classification</div>
+                    <div class="code-snippet" style="margin-top: 10px;">kubectl apply -f deployments/50-gateway-auth-classifier.yaml</div>
+                </div>
+
+                <div class="deployment-phase" id="phase6">
+                    <span class="phase-number">6</span>
+                    <strong>Complete ✅</strong>
+                    <div style="margin-top: 10px; color: #718096;">System ready for production traffic</div>
+                    <div class="code-snippet" style="margin-top: 10px;">kubectl get pods -n tir-inference</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Fallback Strategy -->
+        <div class="diagram-section">
+            <div class="diagram-title">Intelligent Fallback Strategy</div>
+
+            <div class="control-panel">
+                <button class="control-btn" onclick="demonstrateFallback('overflow')">⚠️ Show Overflow</button>
+                <button class="control-btn" onclick="demonstrateFallback('emergency')">🚨 Emergency Fallback</button>
+                <button class="control-btn" onclick="resetFallback()">🔄 Reset</button>
+            </div>
+
+            <div class="animated-diagram">
+                <div class="fallback-path" id="fallback-premium">
+                    <div class="flow-step gpu-h100">
+                        <div><strong>Premium (H100)</strong></div>
+                        <div style="font-size: 0.9em;">Queue: <span id="h100-queue">4</span>/12</div>
+                    </div>
+                    <div class="fallback-arrow" id="arrow1">🔄</div>
+                    <div class="flow-step gpu-a100">
+                        <div><strong>Standard (A100)</strong></div>
+                        <div style="font-size: 0.9em;">Queue: <span id="a100-queue">6</span>/20</div>
+                    </div>
+                    <div class="fallback-arrow" id="arrow2">🔄</div>
+                    <div class="flow-step gpu-l40s">
+                        <div><strong>Economy (L40S)</strong></div>
+                        <div style="font-size: 0.9em;">Queue: <span id="l40s-queue">2</span>/∞</div>
+                    </div>
+                </div>
+
+                <div class="fallback-path" id="fallback-longctx">
+                    <div class="flow-step gpu-h100" style="background: linear-gradient(135deg, #9f7aea, #ed64a6);">
+                        <div><strong>Long Context (H100)</strong></div>
+                        <div style="font-size: 0.9em;">32K context</div>
+                    </div>
+                    <div class="fallback-arrow" id="arrow3">⚠️</div>
+                    <div class="flow-step gpu-h100">
+                        <div><strong>Premium (H100)</strong></div>
+                        <div style="font-size: 0.9em;">Emergency only</div>
+                    </div>
+                </div>
+
+                <div class="explanation-box">
+                    <strong>Fallback Rules:</strong>
+                    <ul>
+                        <li><span class="highlight">Premium → Standard</span>: When queue > 12 requests AND overflow allowed</li>
+                        <li><span class="highlight">Standard → Economy</span>: For batch/async requests when queue > 20</li>
+                        <li><span class="highlight">Long Context → Premium</span>: Emergency fallback only</li>
+                        <li><span class="highlight">LoRA Dedicated</span>: No fallback (requires LoRA capability)</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <!-- EPP Scoring Visualization -->
+        <div class="diagram-section">
+            <div class="diagram-title">EPP Endpoint Scoring</div>
+
+            <div class="control-panel">
+                <button class="control-btn" onclick="simulateScoring()">🎯 Simulate Scoring</button>
+                <button class="control-btn" onclick="resetScoring()">🔄 Reset</button>
+            </div>
+
+            <div class="animated-diagram">
+                <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px;">
+                    <div class="metrics-box" id="endpoint1">
+                        <h4>Pod-1 (H100)</h4>
+                        <div class="metric-value" id="score1">85</div>
+                        <div class="metric-label">Total Score</div>
+                        <div style="margin-top: 10px;">
+                            <div>Queue: <span id="queue1">2</span></div>
+                            <div>Cache: <span id="cache1">78%</span></div>
+                            <div>Prefix: <span id="prefix1">45%</span></div>
+                        </div>
+                    </div>
+
+                    <div class="metrics-box" id="endpoint2">
+                        <h4>Pod-2 (H100)</h4>
+                        <div class="metric-value" id="score2">92</div>
+                        <div class="metric-label">Total Score</div>
+                        <div style="margin-top: 10px;">
+                            <div>Queue: <span id="queue2">1</span></div>
+                            <div>Cache: <span id="cache2">65%</span></div>
+                            <div>Prefix: <span id="prefix2">78%</span></div>
+                        </div>
+                    </div>
+
+                    <div class="metrics-box" id="endpoint3">
+                        <h4>Pod-3 (H100)</h4>
+                        <div class="metric-value" id="score3">76</div>
+                        <div class="metric-label">Total Score</div>
+                        <div style="margin-top: 10px;">
+                            <div>Queue: <span id="queue3">4</span></div>
+                            <div>Cache: <span id="cache3">82%</span></div>
+                            <div>Prefix: <span id="prefix3">23%</span></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="winner-announcement" style="text-align: center; margin-top: 20px; padding: 15px; background: #f0fff4; border-radius: 8px; border: 2px solid #38a169; display: none;">
+                    <h3 style="color: #38a169; margin: 0;">🏆 Pod-2 Selected!</h3>
+                    <p style="margin: 5px 0 0 0;">Highest score due to low queue + high prefix cache hit</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let animationStep = 0;
+        let deploymentStep = 0;
+
+        function animateRequestFlow() {
+            resetAnimation();
+            const steps = ['step1', 'step2', 'step3', 'step4', 'step5', 'step6'];
+
+            steps.forEach((step, index) => {
+                setTimeout(() => {
+                    document.getElementById(step).classList.add('active');
+                }, index * 800);
+            });
+        }
+
+        function resetAnimation() {
+            const steps = ['step1', 'step2', 'step3', 'step4', 'step5', 'step6'];
+            steps.forEach(step => {
+                document.getElementById(step).classList.remove('active');
+            });
+        }
+
+        function demonstrateRouting(type) {
+            const demo = document.getElementById('routing-demo');
+            const tiers = ['h100-tier', 'a100-tier', 'l40s-tier'];
+
+            // Reset all tiers
+            tiers.forEach(tier => {
+                document.getElementById(tier).style.opacity = '0.5';
+                document.getElementById(tier).style.transform = 'scale(1)';
+            });
+
+            let content = '';
+            let selectedTier = '';
+
+            switch(type) {
+                case 'premium':
+                    selectedTier = 'h100-tier';
+                    content = `
+                        <h3 style="color: #f093fb;">🔥 Premium Request Routing</h3>
+                        <p><strong>Headers:</strong> x-serving-class: premium-realtime</p>
+                        <p><strong>Route:</strong> H100 Premium Pool → Sub-100ms response</p>
+                        <p><strong>Use Case:</strong> Production APIs, real-time chat</p>
+                    `;
+                    break;
+                case 'standard':
+                    selectedTier = 'a100-tier';
+                    content = `
+                        <h3 style="color: #4facfe;">⚖️ Standard Request Routing</h3>
+                        <p><strong>Headers:</strong> x-serving-class: standard-realtime</p>
+                        <p><strong>Route:</strong> A100 Standard Pool → Sub-200ms response</p>
+                        <p><strong>Use Case:</strong> General applications, user interfaces</p>
+                    `;
+                    break;
+                case 'economy':
+                    selectedTier = 'l40s-tier';
+                    content = `
+                        <h3 style="color: #43e97b;">💰 Economy Request Routing</h3>
+                        <p><strong>Headers:</strong> x-serving-class: economy-batch</p>
+                        <p><strong>Route:</strong> L40S Economy Pool → Sub-2s response</p>
+                        <p><strong>Use Case:</strong> Batch processing, non-critical workloads</p>
+                    `;
+                    break;
+                case 'longctx':
+                    selectedTier = 'h100-tier';
+                    content = `
+                        <h3 style="color: #9f7aea;">📄 Long Context Routing</h3>
+                        <p><strong>Headers:</strong> x-context-class: long</p>
+                        <p><strong>Route:</strong> H100 Long Context Pool → Specialized handling</p>
+                        <p><strong>Use Case:</strong> Document analysis, long conversations (32K+ tokens)</p>
+                    `;
+                    break;
+            }
+
+            demo.innerHTML = content;
+
+            // Highlight selected tier
+            document.getElementById(selectedTier).style.opacity = '1';
+            document.getElementById(selectedTier).style.transform = 'scale(1.1)';
+        }
+
+        function animateDeployment() {
+            resetDeployment();
+            const phases = ['phase0', 'phase1', 'phase2', 'phase3', 'phase4', 'phase5', 'phase6'];
+
+            phases.forEach((phase, index) => {
+                setTimeout(() => {
+                    const element = document.getElementById(phase);
+                    element.style.background = '#e6fffa';
+                    element.style.borderLeftColor = '#38a169';
+                    element.style.transform = 'translateX(15px) scale(1.02)';
+                }, index * 1000);
+            });
+        }
+
+        function resetDeployment() {
+            const phases = ['phase0', 'phase1', 'phase2', 'phase3', 'phase4', 'phase5', 'phase6'];
+            phases.forEach(phase => {
+                const element = document.getElementById(phase);
+                element.style.background = 'white';
+                element.style.borderLeftColor = '#4299e1';
+                element.style.transform = 'translateX(0) scale(1)';
+            });
+        }
+
+        function demonstrateFallback(scenario) {
+            if (scenario === 'overflow') {
+                // Simulate overflow scenario
+                document.getElementById('h100-queue').textContent = '15';
+                document.getElementById('h100-tier').style.background = 'linear-gradient(135deg, #fc8181, #f56565)';
+
+                setTimeout(() => {
+                    document.getElementById('arrow1').style.color = '#e53e3e';
+                    document.getElementById('arrow1').style.fontSize = '3em';
+                }, 1000);
+
+                setTimeout(() => {
+                    document.getElementById('a100-tier').style.background = 'linear-gradient(135deg, #68d391, #48bb78)';
+                    document.getElementById('a100-queue').textContent = '8';
+                }, 2000);
+            } else if (scenario === 'emergency') {
+                // Simulate emergency fallback
+                document.getElementById('arrow3').style.color = '#e53e3e';
+                document.getElementById('arrow3').style.fontSize = '3em';
+                document.getElementById('arrow3').textContent = '🚨';
+            }
+        }
+
+        function resetFallback() {
+            document.getElementById('h100-queue').textContent = '4';
+            document.getElementById('a100-queue').textContent = '6';
+            document.getElementById('l40s-queue').textContent = '2';
+
+            const tiers = ['h100-tier', 'a100-tier', 'l40s-tier'];
+            tiers.forEach(tier => {
+                const element = document.getElementById(tier);
+                if (tier.includes('h100')) {
+                    element.style.background = 'linear-gradient(135deg, #f093fb, #f5576c)';
+                } else if (tier.includes('a100')) {
+                    element.style.background = 'linear-gradient(135deg, #4facfe, #00f2fe)';
+                } else {
+                    element.style.background = 'linear-gradient(135deg, #43e97b, #38f9d7)';
+                }
+            });
+
+            document.getElementById('arrow1').style.color = '#e53e3e';
+            document.getElementById('arrow1').style.fontSize = '2em';
+            document.getElementById('arrow2').style.color = '#e53e3e';
+            document.getElementById('arrow2').style.fontSize = '2em';
+            document.getElementById('arrow3').style.color = '#e53e3e';
+            document.getElementById('arrow3').style.fontSize = '2em';
+            document.getElementById('arrow3').textContent = '⚠️';
+        }
+
+        function simulateScoring() {
+            // Reset winner announcement
+            document.getElementById('winner-announcement').style.display = 'none';
+
+            // Simulate random scoring
+            const endpoints = [
+                {id: '1', queue: Math.floor(Math.random() * 5) + 1, cache: Math.floor(Math.random() * 40) + 60, prefix: Math.floor(Math.random() * 60) + 20},
+                {id: '2', queue: Math.floor(Math.random() * 5) + 1, cache: Math.floor(Math.random() * 40) + 60, prefix: Math.floor(Math.random() * 60) + 20},
+                {id: '3', queue: Math.floor(Math.random() * 5) + 1, cache: Math.floor(Math.random() * 40) + 60, prefix: Math.floor(Math.random() * 60) + 20}
+            ];
+
+            endpoints.forEach((endpoint, index) => {
+                // Update metrics
+                document.getElementById(`queue${endpoint.id}`).textContent = endpoint.queue;
+                document.getElementById(`cache${endpoint.id}`).textContent = endpoint.cache + '%';
+                document.getElementById(`prefix${endpoint.id}`).textContent = endpoint.prefix + '%';
+
+                // Calculate score (simplified)
+                const queueScore = (6 - endpoint.queue) * 15;
+                const cacheScore = endpoint.cache * 0.5;
+                const prefixScore = endpoint.prefix * 0.8;
+                const totalScore = Math.round(queueScore + cacheScore + prefixScore);
+
+                document.getElementById(`score${endpoint.id}`).textContent = totalScore;
+
+                // Reset styling
+                document.getElementById(`endpoint${endpoint.id}`).style.background = 'white';
+                document.getElementById(`endpoint${endpoint.id}`).style.border = '1px solid #e2e8f0';
+            });
+
+            // Find winner after delay
+            setTimeout(() => {
+                const scores = endpoints.map((ep, i) => ({
+                    id: ep.id,
+                    score: parseInt(document.getElementById(`score${ep.id}`).textContent)
+                }));
+
+                const winner = scores.reduce((prev, current) =>
+                    prev.score > current.score ? prev : current
+                );
+
+                // Highlight winner
+                document.getElementById(`endpoint${winner.id}`).style.background = '#f0fff4';
+                document.getElementById(`endpoint${winner.id}`).style.border = '2px solid #38a169';
+                document.getElementById(`endpoint${winner.id}`).style.transform = 'scale(1.05)';
+
+                // Show announcement
+                const announcement = document.getElementById('winner-announcement');
+                announcement.innerHTML = `
+                    <h3 style="color: #38a169; margin: 0;">🏆 Pod-${winner.id} Selected!</h3>
+                    <p style="margin: 5px 0 0 0;">Score: ${winner.score} - Optimal balance of queue, cache, and prefix metrics</p>
+                `;
+                announcement.style.display = 'block';
+            }, 1500);
+        }
+
+        function resetScoring() {
+            document.getElementById('winner-announcement').style.display = 'none';
+
+            // Reset to default values
+            document.getElementById('queue1').textContent = '2';
+            document.getElementById('cache1').textContent = '78%';
+            document.getElementById('prefix1').textContent = '45%';
+            document.getElementById('score1').textContent = '85';
+
+            document.getElementById('queue2').textContent = '1';
+            document.getElementById('cache2').textContent = '65%';
+            document.getElementById('prefix2').textContent = '78%';
+            document.getElementById('score2').textContent = '92';
+
+            document.getElementById('queue3').textContent = '4';
+            document.getElementById('cache3').textContent = '82%';
+            document.getElementById('prefix3').textContent = '23%';
+            document.getElementById('score3').textContent = '76';
+
+            // Reset styling
+            ['endpoint1', 'endpoint2', 'endpoint3'].forEach(id => {
+                document.getElementById(id).style.background = 'white';
+                document.getElementById(id).style.border = '1px solid #e2e8f0';
+                document.getElementById(id).style.transform = 'scale(1)';
+            });
+        }
+
+        // Auto-start request flow animation on load
+        window.onload = function() {
+            setTimeout(animateRequestFlow, 1000);
+        };
+    </script>
+</body>
+</html>
