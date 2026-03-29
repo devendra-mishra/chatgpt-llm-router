@@ -1,0 +1,1602 @@
+################################################################################
+#
+# TIR GPU-TIER-AWARE PRODUCTION INFERENCE DESIGN
+#
+# PRINCIPLES
+# - Kthena: model lifecycle / rollout / autoscaling / LoRA management
+# - Volcano: gang scheduling / topology-aware placement
+# - kgateway: TLS / auth / quota / rate-limit / header enrichment
+# - llm-d EPP: final endpoint selection inside the selected serving pool
+#
+# SERVING STRATEGY
+# 1. Request classified into a serving class:
+#    - premium-realtime
+#    - standard-realtime
+#    - economy-batch
+#    - long-context
+#    - lora-dedicated
+#
+# 2. Route into GPU-specific pools:
+#    - h100
+#    - a100
+#    - l40s
+#
+# 3. EPP selects best pod using:
+#    - queue score
+#    - kv cache utilization
+#    - prefix cache affinity
+#    - LoRA affinity
+#    - overflow / fallback preference
+#
+################################################################################
+
+
+################################################################################
+# PHASE 0: NAMESPACE / SHARED LABELING CONVENTIONS
+################################################################################
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: tir-inference
+  labels:
+    platform.e2e.ai/component: inference
+
+################################################################################
+# LABELING CONVENTIONS
+#
+# Node labels expected:
+#   gpu.e2e.ai/family: h100 | a100 | l40s
+#   gpu.e2e.ai/memory: "80g" | "48g"
+#   gpu.e2e.ai/interconnect: nvlink | pcie
+#   gpu.e2e.ai/cost-tier: premium | standard | economy
+#
+# Pod labels applied to serving pods:
+#   app: vllm
+#   tir.e2enetworks.com/model: <model-name>
+#   tir.e2enetworks.com/gpu-tier: h100 | a100 | l40s
+#   tir.e2enetworks.com/serving-class: premium-realtime | standard-realtime | economy-batch | long-context | lora-dedicated
+#   tir.e2enetworks.com/lora-capable: "true" | "false"
+#   tir.e2enetworks.com/context-class: standard | long
+#   tir.e2enetworks.com/fallback-from: comma-separated pool names (informational)
+################################################################################
+
+
+################################################################################
+# PHASE 1: MODEL LIFECYCLE — KTHENA MANAGED BASE MODELS
+################################################################################
+
+---
+# 1A. LLAMA 3.1 8B — H100 premium realtime
+apiVersion: workload.serving.volcano.sh/v1alpha1
+kind: ModelBooster
+metadata:
+  name: llama-3-1-8b-h100-premium
+  namespace: tir-inference
+  labels:
+    tir.e2enetworks.com/model: llama-3.1-8b
+    tir.e2enetworks.com/gpu-tier: h100
+    tir.e2enetworks.com/serving-class: premium-realtime
+spec:
+  name: llama-3-1-8b-h100-premium
+  owner: tir-platform
+  backend:
+    name: llama-3-1-8b-h100-server
+    type: vLLM
+  modelURI: hf://meta-llama/Llama-3.1-8B-Instruct
+  cacheURI: pvc://model-cache-pvc/llama-3-1-8b
+  minReplicas: 2
+  maxReplicas: 12
+
+  autoscalingPolicy:
+    metrics:
+      - type: Custom
+        custom:
+          metricName: vllm_num_requests_waiting
+          target:
+            type: AverageValue
+            averageValue: "4"
+    behavior:
+      scaleUp:
+        stabilizationWindowSeconds: 30
+        policies:
+          - type: Pods
+            value: 2
+            periodSeconds: 60
+      scaleDown:
+        stabilizationWindowSeconds: 300
+        policies:
+          - type: Pods
+            value: 1
+            periodSeconds: 300
+
+  envFrom:
+    - secretRef:
+        name: hf-token
+
+  workers:
+    - type: server
+      image: vllm/vllm-openai:v0.8.3
+      replicas: 2
+      pods: 1
+      resources:
+        requests:
+          cpu: "8"
+          memory: 64Gi
+          nvidia.com/gpu: "1"
+        limits:
+          cpu: "16"
+          memory: 96Gi
+          nvidia.com/gpu: "1"
+      config:
+        served-model-name: llama-3.1-8b
+        host: "0.0.0.0"
+        port: "8000"
+        max-model-len: "8192"
+        gpu-memory-utilization: "0.92"
+        enable-prefix-caching: ""
+        disable-log-requests: ""
+      nodeSelector:
+        gpu.e2e.ai/family: h100
+      podLabels:
+        app: vllm
+        tir.e2enetworks.com/model: llama-3.1-8b
+        tir.e2enetworks.com/gpu-tier: h100
+        tir.e2enetworks.com/serving-class: premium-realtime
+        tir.e2enetworks.com/context-class: standard
+        tir.e2enetworks.com/lora-capable: "true"
+
+---
+# 1B. LLAMA 3.1 8B — A100 standard realtime
+apiVersion: workload.serving.volcano.sh/v1alpha1
+kind: ModelBooster
+metadata:
+  name: llama-3-1-8b-a100-standard
+  namespace: tir-inference
+  labels:
+    tir.e2enetworks.com/model: llama-3.1-8b
+    tir.e2enetworks.com/gpu-tier: a100
+    tir.e2enetworks.com/serving-class: standard-realtime
+spec:
+  name: llama-3-1-8b-a100-standard
+  owner: tir-platform
+  backend:
+    name: llama-3-1-8b-a100-server
+    type: vLLM
+  modelURI: hf://meta-llama/Llama-3.1-8B-Instruct
+  cacheURI: pvc://model-cache-pvc/llama-3-1-8b
+  minReplicas: 2
+  maxReplicas: 16
+
+  autoscalingPolicy:
+    metrics:
+      - type: Custom
+        custom:
+          metricName: vllm_num_requests_waiting
+          target:
+            type: AverageValue
+            averageValue: "6"
+
+  envFrom:
+    - secretRef:
+        name: hf-token
+
+  workers:
+    - type: server
+      image: vllm/vllm-openai:v0.8.3
+      replicas: 2
+      pods: 1
+      resources:
+        requests:
+          cpu: "8"
+          memory: 64Gi
+          nvidia.com/gpu: "1"
+        limits:
+          cpu: "16"
+          memory: 96Gi
+          nvidia.com/gpu: "1"
+      config:
+        served-model-name: llama-3.1-8b
+        host: "0.0.0.0"
+        port: "8000"
+        max-model-len: "8192"
+        gpu-memory-utilization: "0.90"
+        enable-prefix-caching: ""
+      nodeSelector:
+        gpu.e2e.ai/family: a100
+      podLabels:
+        app: vllm
+        tir.e2enetworks.com/model: llama-3.1-8b
+        tir.e2enetworks.com/gpu-tier: a100
+        tir.e2enetworks.com/serving-class: standard-realtime
+        tir.e2enetworks.com/context-class: standard
+        tir.e2enetworks.com/lora-capable: "true"
+
+---
+# 1C. LLAMA 3.1 8B — L40S economy batch / overflow
+apiVersion: workload.serving.volcano.sh/v1alpha1
+kind: ModelBooster
+metadata:
+  name: llama-3-1-8b-l40s-economy
+  namespace: tir-inference
+  labels:
+    tir.e2enetworks.com/model: llama-3.1-8b
+    tir.e2enetworks.com/gpu-tier: l40s
+    tir.e2enetworks.com/serving-class: economy-batch
+spec:
+  name: llama-3-1-8b-l40s-economy
+  owner: tir-platform
+  backend:
+    name: llama-3-1-8b-l40s-server
+    type: vLLM
+  modelURI: hf://meta-llama/Llama-3.1-8B-Instruct
+  cacheURI: pvc://model-cache-pvc/llama-3-1-8b
+  minReplicas: 1
+  maxReplicas: 20
+
+  autoscalingPolicy:
+    metrics:
+      - type: Custom
+        custom:
+          metricName: vllm_num_requests_waiting
+          target:
+            type: AverageValue
+            averageValue: "12"
+
+  envFrom:
+    - secretRef:
+        name: hf-token
+
+  workers:
+    - type: server
+      image: vllm/vllm-openai:v0.8.3
+      replicas: 1
+      pods: 1
+      resources:
+        requests:
+          cpu: "6"
+          memory: 48Gi
+          nvidia.com/gpu: "1"
+        limits:
+          cpu: "12"
+          memory: 64Gi
+          nvidia.com/gpu: "1"
+      config:
+        served-model-name: llama-3.1-8b
+        host: "0.0.0.0"
+        port: "8000"
+        max-model-len: "4096"
+        gpu-memory-utilization: "0.88"
+        enable-prefix-caching: ""
+      nodeSelector:
+        gpu.e2e.ai/family: l40s
+      podLabels:
+        app: vllm
+        tir.e2enetworks.com/model: llama-3.1-8b
+        tir.e2enetworks.com/gpu-tier: l40s
+        tir.e2enetworks.com/serving-class: economy-batch
+        tir.e2enetworks.com/context-class: standard
+        tir.e2enetworks.com/lora-capable: "false"
+
+---
+# 1D. LLAMA 3.1 8B — H100 long-context lane
+apiVersion: workload.serving.volcano.sh/v1alpha1
+kind: ModelBooster
+metadata:
+  name: llama-3-1-8b-h100-longctx
+  namespace: tir-inference
+  labels:
+    tir.e2enetworks.com/model: llama-3.1-8b
+    tir.e2enetworks.com/gpu-tier: h100
+    tir.e2enetworks.com/serving-class: long-context
+spec:
+  name: llama-3-1-8b-h100-longctx
+  owner: tir-platform
+  backend:
+    name: llama-3-1-8b-h100-longctx-server
+    type: vLLM
+  modelURI: hf://meta-llama/Llama-3.1-8B-Instruct
+  cacheURI: pvc://model-cache-pvc/llama-3-1-8b
+  minReplicas: 1
+  maxReplicas: 8
+
+  autoscalingPolicy:
+    metrics:
+      - type: Custom
+        custom:
+          metricName: vllm_num_requests_waiting
+          target:
+            type: AverageValue
+            averageValue: "3"
+
+  envFrom:
+    - secretRef:
+        name: hf-token
+
+  workers:
+    - type: server
+      image: vllm/vllm-openai:v0.8.3
+      replicas: 1
+      pods: 1
+      resources:
+        requests:
+          cpu: "12"
+          memory: 96Gi
+          nvidia.com/gpu: "1"
+        limits:
+          cpu: "24"
+          memory: 128Gi
+          nvidia.com/gpu: "1"
+      config:
+        served-model-name: llama-3.1-8b
+        host: "0.0.0.0"
+        port: "8000"
+        max-model-len: "32768"
+        gpu-memory-utilization: "0.94"
+        enable-prefix-caching: ""
+      nodeSelector:
+        gpu.e2e.ai/family: h100
+      podLabels:
+        app: vllm
+        tir.e2enetworks.com/model: llama-3.1-8b
+        tir.e2enetworks.com/gpu-tier: h100
+        tir.e2enetworks.com/serving-class: long-context
+        tir.e2enetworks.com/context-class: long
+        tir.e2enetworks.com/lora-capable: "true"
+
+---
+# 1E. LLAMA 3.1 8B — H100 dedicated LoRA lane
+apiVersion: workload.serving.volcano.sh/v1alpha1
+kind: ModelBooster
+metadata:
+  name: llama-3-1-8b-h100-lora
+  namespace: tir-inference
+  labels:
+    tir.e2enetworks.com/model: llama-3.1-8b
+    tir.e2enetworks.com/gpu-tier: h100
+    tir.e2enetworks.com/serving-class: lora-dedicated
+spec:
+  name: llama-3-1-8b-h100-lora
+  owner: tir-platform
+  backend:
+    name: llama-3-1-8b-h100-lora-server
+    type: vLLM
+  modelURI: hf://meta-llama/Llama-3.1-8B-Instruct
+  cacheURI: pvc://model-cache-pvc/llama-3-1-8b
+  minReplicas: 1
+  maxReplicas: 10
+
+  envFrom:
+    - secretRef:
+        name: hf-token
+
+  workers:
+    - type: server
+      image: vllm/vllm-openai:v0.8.3
+      replicas: 1
+      pods: 1
+      resources:
+        requests:
+          cpu: "12"
+          memory: 96Gi
+          nvidia.com/gpu: "1"
+        limits:
+          cpu: "24"
+          memory: 128Gi
+          nvidia.com/gpu: "1"
+      config:
+        served-model-name: llama-3.1-8b
+        host: "0.0.0.0"
+        port: "8000"
+        max-model-len: "8192"
+        gpu-memory-utilization: "0.92"
+        enable-prefix-caching: ""
+      nodeSelector:
+        gpu.e2e.ai/family: h100
+      podLabels:
+        app: vllm
+        tir.e2enetworks.com/model: llama-3.1-8b
+        tir.e2enetworks.com/gpu-tier: h100
+        tir.e2enetworks.com/serving-class: lora-dedicated
+        tir.e2enetworks.com/context-class: standard
+        tir.e2enetworks.com/lora-capable: "true"
+
+  # Example LoRA adapters Kthena should hot-load / pin
+  loraAdapters:
+    - name: customer-support-v2
+      adapterURI: hf://my-org/customer-support-lora-v2
+      weight: 1
+    - name: legal-assistant-v1
+      adapterURI: hf://my-org/legal-assistant-v1
+      weight: 1
+
+
+################################################################################
+# PHASE 1B: LARGE MODEL WITH PREFILL / DECODE DISAGGREGATION
+################################################################################
+
+---
+apiVersion: workload.serving.volcano.sh/v1alpha1
+kind: ModelServing
+metadata:
+  name: deepseek-v3-h100-a100-pd
+  namespace: tir-inference
+  labels:
+    tir.e2enetworks.com/model: deepseek-v3
+spec:
+  schedulerName: volcano
+  replicas: 1
+
+  template:
+    restartGracePeriodSeconds: 180
+    gangPolicy:
+      minRoleReplicas:
+        prefill: 2
+        decode: 4
+    topologyPolicy:
+      hyperNode: true
+
+    roles:
+      - name: prefill
+        replicas: 2
+        entryTemplate:
+          metadata:
+            labels:
+              app: vllm
+              tir.e2enetworks.com/model: deepseek-v3
+              tir.e2enetworks.com/gpu-tier: h100
+              tir.e2enetworks.com/serving-class: premium-realtime
+              tir.e2enetworks.com/context-class: long
+              tir.e2enetworks.com/lora-capable: "false"
+              llm-d.ai/role: prefill
+          spec:
+            nodeSelector:
+              gpu.e2e.ai/family: h100
+            containers:
+              - name: vllm-prefill
+                image: vllm/vllm-openai:v0.8.3
+                command: ["python3", "-m", "vllm.entrypoints.openai.api_server"]
+                args:
+                  - "--model"
+                  - "deepseek-ai/DeepSeek-V3"
+                  - "--served-model-name"
+                  - "deepseek-v3"
+                  - "--port"
+                  - "8000"
+                  - "--tensor-parallel-size"
+                  - "4"
+                  - "--max-model-len"
+                  - "32768"
+                  - "--gpu-memory-utilization"
+                  - "0.94"
+                env:
+                  - name: HUGGING_FACE_HUB_TOKEN
+                    valueFrom:
+                      secretKeyRef:
+                        name: hf-token
+                        key: token
+                resources:
+                  requests:
+                    cpu: "16"
+                    memory: 256Gi
+                    nvidia.com/gpu: "4"
+                  limits:
+                    cpu: "32"
+                    memory: 256Gi
+                    nvidia.com/gpu: "4"
+
+      - name: decode
+        replicas: 4
+        entryTemplate:
+          metadata:
+            labels:
+              app: vllm
+              tir.e2enetworks.com/model: deepseek-v3
+              tir.e2enetworks.com/gpu-tier: a100
+              tir.e2enetworks.com/serving-class: premium-realtime
+              tir.e2enetworks.com/context-class: long
+              tir.e2enetworks.com/lora-capable: "false"
+              llm-d.ai/role: decode
+          spec:
+            nodeSelector:
+              gpu.e2e.ai/family: a100
+            containers:
+              - name: vllm-decode
+                image: vllm/vllm-openai:v0.8.3
+                command: ["python3", "-m", "vllm.entrypoints.openai.api_server"]
+                args:
+                  - "--model"
+                  - "deepseek-ai/DeepSeek-V3"
+                  - "--served-model-name"
+                  - "deepseek-v3"
+                  - "--port"
+                  - "8000"
+                  - "--tensor-parallel-size"
+                  - "2"
+                  - "--max-model-len"
+                  - "32768"
+                  - "--gpu-memory-utilization"
+                  - "0.92"
+                env:
+                  - name: HUGGING_FACE_HUB_TOKEN
+                    valueFrom:
+                      secretKeyRef:
+                        name: hf-token
+                        key: token
+                resources:
+                  requests:
+                    cpu: "8"
+                    memory: 128Gi
+                    nvidia.com/gpu: "2"
+                  limits:
+                    cpu: "16"
+                    memory: 128Gi
+                    nvidia.com/gpu: "2"
+
+
+################################################################################
+# PHASE 2: INFERENCE POOLS — SPLIT BY MODEL + GPU TIER + SERVING CLASS
+################################################################################
+
+---
+apiVersion: inference.networking.x-k8s.io/v1alpha2
+kind: InferencePool
+metadata:
+  name: llama-3-1-8b-h100-premium
+  namespace: tir-inference
+  labels:
+    tir.e2enetworks.com/fallback-priority: "100"
+spec:
+  targetPortNumber: 8000
+  selector:
+    matchLabels:
+      app: vllm
+      tir.e2enetworks.com/model: llama-3.1-8b
+      tir.e2enetworks.com/gpu-tier: h100
+      tir.e2enetworks.com/serving-class: premium-realtime
+  extensionRef:
+    name: epp-llama-premium
+
+---
+apiVersion: inference.networking.x-k8s.io/v1alpha2
+kind: InferencePool
+metadata:
+  name: llama-3-1-8b-a100-standard
+  namespace: tir-inference
+  labels:
+    tir.e2enetworks.com/fallback-priority: "80"
+spec:
+  targetPortNumber: 8000
+  selector:
+    matchLabels:
+      app: vllm
+      tir.e2enetworks.com/model: llama-3.1-8b
+      tir.e2enetworks.com/gpu-tier: a100
+      tir.e2enetworks.com/serving-class: standard-realtime
+  extensionRef:
+    name: epp-llama-standard
+
+---
+apiVersion: inference.networking.x-k8s.io/v1alpha2
+kind: InferencePool
+metadata:
+  name: llama-3-1-8b-l40s-economy
+  namespace: tir-inference
+  labels:
+    tir.e2enetworks.com/fallback-priority: "50"
+spec:
+  targetPortNumber: 8000
+  selector:
+    matchLabels:
+      app: vllm
+      tir.e2enetworks.com/model: llama-3.1-8b
+      tir.e2enetworks.com/gpu-tier: l40s
+      tir.e2enetworks.com/serving-class: economy-batch
+  extensionRef:
+    name: epp-llama-economy
+
+---
+apiVersion: inference.networking.x-k8s.io/v1alpha2
+kind: InferencePool
+metadata:
+  name: llama-3-1-8b-h100-longctx
+  namespace: tir-inference
+spec:
+  targetPortNumber: 8000
+  selector:
+    matchLabels:
+      app: vllm
+      tir.e2enetworks.com/model: llama-3.1-8b
+      tir.e2enetworks.com/gpu-tier: h100
+      tir.e2enetworks.com/serving-class: long-context
+      tir.e2enetworks.com/context-class: long
+  extensionRef:
+    name: epp-llama-longctx
+
+---
+apiVersion: inference.networking.x-k8s.io/v1alpha2
+kind: InferencePool
+metadata:
+  name: llama-3-1-8b-h100-lora
+  namespace: tir-inference
+spec:
+  targetPortNumber: 8000
+  selector:
+    matchLabels:
+      app: vllm
+      tir.e2enetworks.com/model: llama-3.1-8b
+      tir.e2enetworks.com/gpu-tier: h100
+      tir.e2enetworks.com/serving-class: lora-dedicated
+      tir.e2enetworks.com/lora-capable: "true"
+  extensionRef:
+    name: epp-llama-lora
+
+---
+apiVersion: inference.networking.x-k8s.io/v1alpha2
+kind: InferencePool
+metadata:
+  name: deepseek-v3-pd
+  namespace: tir-inference
+spec:
+  targetPortNumber: 8000
+  selector:
+    matchLabels:
+      app: vllm
+      tir.e2enetworks.com/model: deepseek-v3
+  extensionRef:
+    name: epp-deepseek-pd
+
+
+################################################################################
+# PHASE 3: INFERENCE MODEL ABSTRACTION
+################################################################################
+
+---
+apiVersion: inference.networking.x-k8s.io/v1alpha2
+kind: InferenceModel
+metadata:
+  name: llama-3-1-8b
+  namespace: tir-inference
+spec:
+  modelName: llama-3.1-8b
+  criticality: Standard
+  poolRef:
+    name: llama-3-1-8b-a100-standard
+
+---
+apiVersion: inference.networking.x-k8s.io/v1alpha2
+kind: InferenceModel
+metadata:
+  name: llama-3-1-8b-premium
+  namespace: tir-inference
+spec:
+  modelName: llama-3.1-8b-premium
+  criticality: Critical
+  poolRef:
+    name: llama-3-1-8b-h100-premium
+
+---
+apiVersion: inference.networking.x-k8s.io/v1alpha2
+kind: InferenceModel
+metadata:
+  name: llama-3-1-8b-longctx
+  namespace: tir-inference
+spec:
+  modelName: llama-3.1-8b-longctx
+  criticality: Critical
+  poolRef:
+    name: llama-3-1-8b-h100-longctx
+
+---
+apiVersion: inference.networking.x-k8s.io/v1alpha2
+kind: InferenceModel
+metadata:
+  name: llama-3-1-8b-lora
+  namespace: tir-inference
+spec:
+  modelName: llama-3.1-8b-lora
+  criticality: Critical
+  poolRef:
+    name: llama-3-1-8b-h100-lora
+
+---
+apiVersion: inference.networking.x-k8s.io/v1alpha2
+kind: InferenceModel
+metadata:
+  name: deepseek-v3
+  namespace: tir-inference
+spec:
+  modelName: deepseek-v3
+  criticality: Critical
+  poolRef:
+    name: deepseek-v3-pd
+
+
+################################################################################
+# PHASE 4: EPP DEPLOYMENTS
+################################################################################
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: llm-d-epp
+  namespace: tir-inference
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: llm-d-epp-reader
+  namespace: tir-inference
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "services", "endpoints"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["inference.networking.x-k8s.io"]
+    resources: ["inferencepools", "inferencemodels"]
+    verbs: ["get", "list", "watch"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: llm-d-epp-reader
+  namespace: tir-inference
+subjects:
+  - kind: ServiceAccount
+    name: llm-d-epp
+roleRef:
+  kind: Role
+  name: llm-d-epp-reader
+  apiGroup: rbac.authorization.k8s.io
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: epp-llama-premium
+  namespace: tir-inference
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: llm-d-epp
+      pool: llama-premium
+  template:
+    metadata:
+      labels:
+        app: llm-d-epp
+        pool: llama-premium
+    spec:
+      serviceAccountName: llm-d-epp
+      containers:
+        - name: epp
+          image: ghcr.io/llm-d/llm-d-inference-scheduler:v0.6.0
+          args:
+            - --poolName=llama-3-1-8b-h100-premium
+            - --poolNamespace=tir-inference
+          env:
+            - name: EPP_PLUGINS_CONFIG
+              value: /etc/epp/config.yaml
+          ports:
+            - name: grpc
+              containerPort: 9002
+            - name: metrics
+              containerPort: 9090
+          volumeMounts:
+            - name: epp-config
+              mountPath: /etc/epp
+      volumes:
+        - name: epp-config
+          configMap:
+            name: epp-config-llama-premium
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: epp-llama-premium
+  namespace: tir-inference
+spec:
+  selector:
+    app: llm-d-epp
+    pool: llama-premium
+  ports:
+    - name: grpc
+      port: 9002
+      targetPort: 9002
+    - name: metrics
+      port: 9090
+      targetPort: 9090
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: epp-llama-standard
+  namespace: tir-inference
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: llm-d-epp
+      pool: llama-standard
+  template:
+    metadata:
+      labels:
+        app: llm-d-epp
+        pool: llama-standard
+    spec:
+      serviceAccountName: llm-d-epp
+      containers:
+        - name: epp
+          image: ghcr.io/llm-d/llm-d-inference-scheduler:v0.6.0
+          args:
+            - --poolName=llama-3-1-8b-a100-standard
+            - --poolNamespace=tir-inference
+          env:
+            - name: EPP_PLUGINS_CONFIG
+              value: /etc/epp/config.yaml
+          ports:
+            - name: grpc
+              containerPort: 9002
+            - name: metrics
+              containerPort: 9090
+          volumeMounts:
+            - name: epp-config
+              mountPath: /etc/epp
+      volumes:
+        - name: epp-config
+          configMap:
+            name: epp-config-llama-standard
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: epp-llama-economy
+  namespace: tir-inference
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: llm-d-epp
+      pool: llama-economy
+  template:
+    metadata:
+      labels:
+        app: llm-d-epp
+        pool: llama-economy
+    spec:
+      serviceAccountName: llm-d-epp
+      containers:
+        - name: epp
+          image: ghcr.io/llm-d/llm-d-inference-scheduler:v0.6.0
+          args:
+            - --poolName=llama-3-1-8b-l40s-economy
+            - --poolNamespace=tir-inference
+          env:
+            - name: EPP_PLUGINS_CONFIG
+              value: /etc/epp/config.yaml
+          ports:
+            - name: grpc
+              containerPort: 9002
+            - name: metrics
+              containerPort: 9090
+          volumeMounts:
+            - name: epp-config
+              mountPath: /etc/epp
+      volumes:
+        - name: epp-config
+          configMap:
+            name: epp-config-llama-economy
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: epp-llama-longctx
+  namespace: tir-inference
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: llm-d-epp
+      pool: llama-longctx
+  template:
+    metadata:
+      labels:
+        app: llm-d-epp
+        pool: llama-longctx
+    spec:
+      serviceAccountName: llm-d-epp
+      containers:
+        - name: epp
+          image: ghcr.io/llm-d/llm-d-inference-scheduler:v0.6.0
+          args:
+            - --poolName=llama-3-1-8b-h100-longctx
+            - --poolNamespace=tir-inference
+          env:
+            - name: EPP_PLUGINS_CONFIG
+              value: /etc/epp/config.yaml
+          ports:
+            - name: grpc
+              containerPort: 9002
+            - name: metrics
+              containerPort: 9090
+          volumeMounts:
+            - name: epp-config
+              mountPath: /etc/epp
+      volumes:
+        - name: epp-config
+          configMap:
+            name: epp-config-llama-longctx
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: epp-llama-lora
+  namespace: tir-inference
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: llm-d-epp
+      pool: llama-lora
+  template:
+    metadata:
+      labels:
+        app: llm-d-epp
+        pool: llama-lora
+    spec:
+      serviceAccountName: llm-d-epp
+      containers:
+        - name: epp
+          image: ghcr.io/llm-d/llm-d-inference-scheduler:v0.6.0
+          args:
+            - --poolName=llama-3-1-8b-h100-lora
+            - --poolNamespace=tir-inference
+          env:
+            - name: EPP_PLUGINS_CONFIG
+              value: /etc/epp/config.yaml
+          ports:
+            - name: grpc
+              containerPort: 9002
+            - name: metrics
+              containerPort: 9090
+          volumeMounts:
+            - name: epp-config
+              mountPath: /etc/epp
+      volumes:
+        - name: epp-config
+          configMap:
+            name: epp-config-llama-lora
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: epp-deepseek-pd
+  namespace: tir-inference
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: llm-d-epp
+      pool: deepseek-pd
+  template:
+    metadata:
+      labels:
+        app: llm-d-epp
+        pool: deepseek-pd
+    spec:
+      serviceAccountName: llm-d-epp
+      containers:
+        - name: epp
+          image: ghcr.io/llm-d/llm-d-inference-scheduler:v0.6.0
+          args:
+            - --poolName=deepseek-v3-pd
+            - --poolNamespace=tir-inference
+          env:
+            - name: EPP_PLUGINS_CONFIG
+              value: /etc/epp/pd-config.yaml
+          ports:
+            - name: grpc
+              containerPort: 9002
+            - name: metrics
+              containerPort: 9090
+          volumeMounts:
+            - name: epp-config
+              mountPath: /etc/epp
+      volumes:
+        - name: epp-config
+          configMap:
+            name: epp-config-deepseek-pd
+
+
+################################################################################
+# PHASE 5: EPP SCORING / FALLBACK / OVERFLOW CONFIG
+################################################################################
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: epp-config-llama-premium
+  namespace: tir-inference
+data:
+  config.yaml: |
+    apiVersion: inference.networking.x-k8s.io/v1alpha1
+    kind: EndpointPickerConfig
+    plugins:
+      - type: queue-scorer
+      - type: kv-cache-utilization-scorer
+      - type: prefix-cache-scorer
+        parameters:
+          maxPrefixBlocksToMatch: 512
+          lruCapacityPerServer: 62500
+      - type: max-score-picker
+    schedulingProfiles:
+      - name: default
+        plugins:
+          - pluginRef: queue-scorer
+            weight: 2
+          - pluginRef: kv-cache-utilization-scorer
+            weight: 2
+          - pluginRef: prefix-cache-scorer
+            weight: 2
+          - pluginRef: max-score-picker
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: epp-config-llama-standard
+  namespace: tir-inference
+data:
+  config.yaml: |
+    apiVersion: inference.networking.x-k8s.io/v1alpha1
+    kind: EndpointPickerConfig
+    plugins:
+      - type: queue-scorer
+      - type: kv-cache-utilization-scorer
+      - type: prefix-cache-scorer
+      - type: max-score-picker
+    schedulingProfiles:
+      - name: default
+        plugins:
+          - pluginRef: queue-scorer
+            weight: 3
+          - pluginRef: kv-cache-utilization-scorer
+            weight: 2
+          - pluginRef: prefix-cache-scorer
+            weight: 1
+          - pluginRef: max-score-picker
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: epp-config-llama-economy
+  namespace: tir-inference
+data:
+  config.yaml: |
+    apiVersion: inference.networking.x-k8s.io/v1alpha1
+    kind: EndpointPickerConfig
+    plugins:
+      - type: queue-scorer
+      - type: max-score-picker
+    schedulingProfiles:
+      - name: default
+        plugins:
+          - pluginRef: queue-scorer
+            weight: 5
+          - pluginRef: max-score-picker
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: epp-config-llama-longctx
+  namespace: tir-inference
+data:
+  config.yaml: |
+    apiVersion: inference.networking.x-k8s.io/v1alpha1
+    kind: EndpointPickerConfig
+    plugins:
+      - type: kv-cache-utilization-scorer
+      - type: prefix-cache-scorer
+        parameters:
+          maxPrefixBlocksToMatch: 1024
+          lruCapacityPerServer: 125000
+      - type: queue-scorer
+      - type: max-score-picker
+    schedulingProfiles:
+      - name: default
+        plugins:
+          - pluginRef: kv-cache-utilization-scorer
+            weight: 3
+          - pluginRef: prefix-cache-scorer
+            weight: 3
+          - pluginRef: queue-scorer
+            weight: 1
+          - pluginRef: max-score-picker
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: epp-config-llama-lora
+  namespace: tir-inference
+data:
+  config.yaml: |
+    apiVersion: inference.networking.x-k8s.io/v1alpha1
+    kind: EndpointPickerConfig
+    plugins:
+      - type: queue-scorer
+      - type: kv-cache-utilization-scorer
+      - type: prefix-cache-scorer
+      # Custom / conceptual plugin:
+      # favors pods where requested adapter is already loaded/hot
+      - type: lora-affinity-scorer
+      - type: max-score-picker
+    schedulingProfiles:
+      - name: default
+        plugins:
+          - pluginRef: lora-affinity-scorer
+            weight: 4
+          - pluginRef: prefix-cache-scorer
+            weight: 2
+          - pluginRef: kv-cache-utilization-scorer
+            weight: 2
+          - pluginRef: queue-scorer
+            weight: 1
+          - pluginRef: max-score-picker
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: epp-config-deepseek-pd
+  namespace: tir-inference
+data:
+  pd-config.yaml: |
+    apiVersion: inference.networking.x-k8s.io/v1alpha1
+    kind: EndpointPickerConfig
+    featureGates:
+      - prepareDataPlugins
+    plugins:
+      - type: prefill-header-handler
+      - type: prefix-based-pd-decider
+        parameters:
+          nonCachedTokens: 16
+      - type: prefix-cache-scorer
+      - type: queue-scorer
+      - type: prefill-filter
+      - type: decode-filter
+      - type: pd-profile-handler
+      - type: max-score-picker
+
+
+################################################################################
+# PHASE 6: KGATEWAY — AUTH + REQUEST CLASSIFICATION HEADERS
+################################################################################
+
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: tir-inference-gateway
+  namespace: tir-inference
+spec:
+  gatewayClassName: kgateway
+  listeners:
+    - name: https
+      port: 443
+      protocol: HTTPS
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - name: tir-inference-tls
+
+---
+apiVersion: gateway.kgateway.dev/v1alpha1
+kind: TrafficPolicy
+metadata:
+  name: tir-jwt-auth
+  namespace: tir-inference
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: tir-inference-gateway
+  jwtAuth:
+    providers:
+      - name: tir-iam
+        issuer: "https://auth.e2enetworks.com"
+        audiences:
+          - "tir-inference-api"
+        jwks:
+          remoteJWKS:
+            url: "https://auth.e2enetworks.com/.well-known/jwks.json"
+            cacheDuration: "300s"
+        claimToHeaders:
+          - claim: "sub"
+            header: "x-user-id"
+          - claim: "team_id"
+            header: "x-team-id"
+          - claim: "project_id"
+            header: "x-project-id"
+          - claim: "tier"
+            header: "x-user-tier"
+        tokenSource:
+          - headerSource:
+              name: "Authorization"
+              prefix: "Bearer "
+
+---
+apiVersion: gateway.kgateway.dev/v1alpha1
+kind: GatewayExtension
+metadata:
+  name: tir-ext-auth
+  namespace: tir-inference
+spec:
+  type: ExtAuth
+  extAuth:
+    failOpen: false
+    grpcService:
+      backendRef:
+        name: tir-auth-service
+        port: 9001
+
+---
+apiVersion: gateway.kgateway.dev/v1alpha1
+kind: TrafficPolicy
+metadata:
+  name: tir-ext-auth-policy
+  namespace: tir-inference
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: tir-inference-gateway
+  extAuth:
+    extensionRef:
+      name: tir-ext-auth
+
+---
+# Request classifier:
+# This component should inspect request body / headers and set:
+#   x-inference-model
+#   x-serving-class
+#   x-context-class
+#   x-lora-adapter
+#   x-overflow-allowed
+#
+# Examples:
+# - prompt_tokens > 12000             => x-context-class: long
+# - adapter present                   => x-serving-class: lora-dedicated
+# - paid tier with low-latency flag   => x-serving-class: premium-realtime
+# - batch async requests              => x-serving-class: economy-batch
+apiVersion: gateway.kgateway.dev/v1alpha1
+kind: GatewayExtension
+metadata:
+  name: tir-request-classifier
+  namespace: tir-inference
+spec:
+  type: ExtProc
+  extProc:
+    grpcService:
+      backendRef:
+        name: tir-request-classifier
+        port: 9003
+
+---
+apiVersion: gateway.kgateway.dev/v1alpha1
+kind: TrafficPolicy
+metadata:
+  name: tir-request-classifier-policy
+  namespace: tir-inference
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: tir-inference-gateway
+  extProc:
+    extensionRef:
+      name: tir-request-classifier
+
+
+################################################################################
+# PHASE 7: ROUTING — PRIMARY + FALLBACK + OVERFLOW LANES
+################################################################################
+
+---
+# Premium realtime requests -> H100 first
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: route-llama-premium
+  namespace: tir-inference
+spec:
+  parentRefs:
+    - name: tir-inference-gateway
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /v1/chat/completions
+          headers:
+            - name: x-inference-model
+              value: llama-3.1-8b
+            - name: x-serving-class
+              value: premium-realtime
+      backendRefs:
+        - group: inference.networking.x-k8s.io
+          kind: InferencePool
+          name: llama-3-1-8b-h100-premium
+
+---
+# Standard realtime -> A100 first
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: route-llama-standard
+  namespace: tir-inference
+spec:
+  parentRefs:
+    - name: tir-inference-gateway
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /v1/chat/completions
+          headers:
+            - name: x-inference-model
+              value: llama-3.1-8b
+            - name: x-serving-class
+              value: standard-realtime
+      backendRefs:
+        - group: inference.networking.x-k8s.io
+          kind: InferencePool
+          name: llama-3-1-8b-a100-standard
+
+---
+# Long context -> dedicated H100 long-context lane
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: route-llama-longctx
+  namespace: tir-inference
+spec:
+  parentRefs:
+    - name: tir-inference-gateway
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /v1/chat/completions
+          headers:
+            - name: x-inference-model
+              value: llama-3.1-8b
+            - name: x-context-class
+              value: long
+      backendRefs:
+        - group: inference.networking.x-k8s.io
+          kind: InferencePool
+          name: llama-3-1-8b-h100-longctx
+
+---
+# LoRA requests -> dedicated H100 LoRA lane
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: route-llama-lora
+  namespace: tir-inference
+spec:
+  parentRefs:
+    - name: tir-inference-gateway
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /v1/chat/completions
+          headers:
+            - name: x-inference-model
+              value: llama-3.1-8b
+            - name: x-serving-class
+              value: lora-dedicated
+      backendRefs:
+        - group: inference.networking.x-k8s.io
+          kind: InferencePool
+          name: llama-3-1-8b-h100-lora
+
+---
+# Economy / async batch -> L40S
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: route-llama-economy
+  namespace: tir-inference
+spec:
+  parentRefs:
+    - name: tir-inference-gateway
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /v1/chat/completions
+          headers:
+            - name: x-inference-model
+              value: llama-3.1-8b
+            - name: x-serving-class
+              value: economy-batch
+      backendRefs:
+        - group: inference.networking.x-k8s.io
+          kind: InferencePool
+          name: llama-3-1-8b-l40s-economy
+
+---
+# DeepSeek route
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: route-deepseek-v3
+  namespace: tir-inference
+spec:
+  parentRefs:
+    - name: tir-inference-gateway
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /v1/chat/completions
+          headers:
+            - name: x-inference-model
+              value: deepseek-v3
+      backendRefs:
+        - group: inference.networking.x-k8s.io
+          kind: InferencePool
+          name: deepseek-v3-pd
+
+
+################################################################################
+# PHASE 8: FALLBACK / OVERFLOW POLICY
+################################################################################
+
+---
+# Overflow rules are best implemented in the request-classifier or ext-auth layer.
+# It should rewrite x-serving-class based on health/load/SLO and allowed downgrade policy.
+#
+# Suggested policy:
+# 1. long-context always stays in long-context lane unless explicit downgrade allowed
+# 2. lora-dedicated stays in lora lane if adapter is pinned/hot
+# 3. premium -> fallback to standard only if:
+#      - x-overflow-allowed=true
+#      - premium pool queue depth > threshold
+#      - no healthy H100 endpoint
+# 4. standard -> fallback to economy if:
+#      - async/batch or non-strict-latency
+# 5. never overflow LoRA traffic to non-lora-capable pods
+#
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tir-routing-policy
+  namespace: tir-inference
+data:
+  policy.yaml: |
+    routingPolicy:
+      defaults:
+        overflowAllowedHeader: x-overflow-allowed
+        strictLatencyHeader: x-strict-latency
+      classes:
+        premium-realtime:
+          primaryPool: llama-3-1-8b-h100-premium
+          fallbackPools:
+            - llama-3-1-8b-a100-standard
+          overflowConditions:
+            maxQueueDepth: 12
+            minHealthyEndpoints: 1
+        standard-realtime:
+          primaryPool: llama-3-1-8b-a100-standard
+          fallbackPools:
+            - llama-3-1-8b-l40s-economy
+          overflowConditions:
+            maxQueueDepth: 20
+            minHealthyEndpoints: 1
+        economy-batch:
+          primaryPool: llama-3-1-8b-l40s-economy
+          fallbackPools: []
+        long-context:
+          primaryPool: llama-3-1-8b-h100-longctx
+          fallbackPools:
+            - llama-3-1-8b-h100-premium
+          overflowConditions:
+            maxQueueDepth: 6
+            minHealthyEndpoints: 1
+        lora-dedicated:
+          primaryPool: llama-3-1-8b-h100-lora
+          fallbackPools: []
+          constraints:
+            requireLoraCapable: true
+            requireAdapterHotOrLoadable: true
+
+
+################################################################################
+# PHASE 9: RATE LIMITING BY TIER
+################################################################################
+
+---
+apiVersion: gateway.kgateway.dev/v1alpha1
+kind: TrafficPolicy
+metadata:
+  name: tir-rate-limit
+  namespace: tir-inference
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: tir-inference-gateway
+  rateLimit:
+    local:
+      tokenBucket:
+        maxTokens: 300
+        tokensPerFill: 300
+        fillInterval: "60s"
+
+
+################################################################################
+# PHASE 10: OBSERVABILITY
+################################################################################
+
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: epp-metrics
+  namespace: tir-inference
+  labels:
+    release: prometheus
+spec:
+  selector:
+    matchLabels:
+      app: llm-d-epp
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 15s
+
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: vllm-metrics
+  namespace: tir-inference
+  labels:
+    release: prometheus
+spec:
+  selector:
+    matchLabels:
+      app: vllm
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 15s
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: model-cache-pvc
+  namespace: tir-inference
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: sfs
+  resources:
+    requests:
+      storage: 1000Gi

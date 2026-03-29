@@ -1,0 +1,153 @@
+# PHASE 7: ROUTING — PRIMARY + FALLBACK + OVERFLOW LANES
+################################################################################
+
+---
+# Premium realtime requests -> H100 first
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: route-llama-premium
+  namespace: tir-inference
+spec:
+  parentRefs:
+    - name: tir-inference-gateway
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /v1/chat/completions
+          headers:
+            - name: x-inference-model
+              value: llama-3.1-8b
+            - name: x-serving-class
+              value: premium-realtime
+      backendRefs:
+        - group: inference.networking.x-k8s.io
+          kind: InferencePool
+          name: llama-3-1-8b-h100-premium
+
+---
+# Standard realtime -> A100 first
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: route-llama-standard
+  namespace: tir-inference
+spec:
+  parentRefs:
+    - name: tir-inference-gateway
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /v1/chat/completions
+          headers:
+            - name: x-inference-model
+              value: llama-3.1-8b
+            - name: x-serving-class
+              value: standard-realtime
+      backendRefs:
+        - group: inference.networking.x-k8s.io
+          kind: InferencePool
+          name: llama-3-1-8b-a100-standard
+
+---
+# Long context -> dedicated H100 long-context lane
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: route-llama-longctx
+  namespace: tir-inference
+spec:
+  parentRefs:
+    - name: tir-inference-gateway
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /v1/chat/completions
+          headers:
+            - name: x-inference-model
+              value: llama-3.1-8b
+            - name: x-context-class
+              value: long
+      backendRefs:
+        - group: inference.networking.x-k8s.io
+          kind: InferencePool
+          name: llama-3-1-8b-h100-longctx
+
+---
+# LoRA requests -> dedicated H100 LoRA lane
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: route-llama-lora
+  namespace: tir-inference
+spec:
+  parentRefs:
+    - name: tir-inference-gateway
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /v1/chat/completions
+          headers:
+            - name: x-inference-model
+              value: llama-3.1-8b
+            - name: x-serving-class
+              value: lora-dedicated
+      backendRefs:
+        - group: inference.networking.x-k8s.io
+          kind: InferencePool
+          name: llama-3-1-8b-h100-lora
+
+---
+# Economy / async batch -> L40S
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: route-llama-economy
+  namespace: tir-inference
+spec:
+  parentRefs:
+    - name: tir-inference-gateway
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /v1/chat/completions
+          headers:
+            - name: x-inference-model
+              value: llama-3.1-8b
+            - name: x-serving-class
+              value: economy-batch
+      backendRefs:
+        - group: inference.networking.x-k8s.io
+          kind: InferencePool
+          name: llama-3-1-8b-l40s-economy
+
+---
+# DeepSeek route
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: route-deepseek-v3
+  namespace: tir-inference
+spec:
+  parentRefs:
+    - name: tir-inference-gateway
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /v1/chat/completions
+          headers:
+            - name: x-inference-model
+              value: deepseek-v3
+      backendRefs:
+        - group: inference.networking.x-k8s.io
+          kind: InferencePool
+          name: deepseek-v3-pd
+
+
+################################################################################

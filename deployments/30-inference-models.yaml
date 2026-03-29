@@ -1,0 +1,65 @@
+# PHASE 3: INFERENCE MODEL ABSTRACTION
+################################################################################
+
+---
+apiVersion: inference.networking.x-k8s.io/v1alpha2
+kind: InferenceModel
+metadata:
+  name: llama-3-1-8b
+  namespace: tir-inference
+spec:
+  modelName: llama-3.1-8b
+  criticality: Standard
+  poolRef:
+    name: llama-3-1-8b-a100-standard
+
+---
+apiVersion: inference.networking.x-k8s.io/v1alpha2
+kind: InferenceModel
+metadata:
+  name: llama-3-1-8b-premium
+  namespace: tir-inference
+spec:
+  modelName: llama-3.1-8b-premium
+  criticality: Critical
+  poolRef:
+    name: llama-3-1-8b-h100-premium
+
+---
+apiVersion: inference.networking.x-k8s.io/v1alpha2
+kind: InferenceModel
+metadata:
+  name: llama-3-1-8b-longctx
+  namespace: tir-inference
+spec:
+  modelName: llama-3.1-8b-longctx
+  criticality: Critical
+  poolRef:
+    name: llama-3-1-8b-h100-longctx
+
+---
+apiVersion: inference.networking.x-k8s.io/v1alpha2
+kind: InferenceModel
+metadata:
+  name: llama-3-1-8b-lora
+  namespace: tir-inference
+spec:
+  modelName: llama-3.1-8b-lora
+  criticality: Critical
+  poolRef:
+    name: llama-3-1-8b-h100-lora
+
+---
+apiVersion: inference.networking.x-k8s.io/v1alpha2
+kind: InferenceModel
+metadata:
+  name: deepseek-v3
+  namespace: tir-inference
+spec:
+  modelName: deepseek-v3
+  criticality: Critical
+  poolRef:
+    name: deepseek-v3-pd
+
+
+################################################################################

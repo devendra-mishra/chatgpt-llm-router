@@ -1,0 +1,303 @@
+# PHASE 4: EPP DEPLOYMENTS
+################################################################################
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: llm-d-epp
+  namespace: tir-inference
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: llm-d-epp-reader
+  namespace: tir-inference
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "services", "endpoints"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["inference.networking.x-k8s.io"]
+    resources: ["inferencepools", "inferencemodels"]
+    verbs: ["get", "list", "watch"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: llm-d-epp-reader
+  namespace: tir-inference
+subjects:
+  - kind: ServiceAccount
+    name: llm-d-epp
+roleRef:
+  kind: Role
+  name: llm-d-epp-reader
+  apiGroup: rbac.authorization.k8s.io
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: epp-llama-premium
+  namespace: tir-inference
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: llm-d-epp
+      pool: llama-premium
+  template:
+    metadata:
+      labels:
+        app: llm-d-epp
+        pool: llama-premium
+    spec:
+      serviceAccountName: llm-d-epp
+      containers:
+        - name: epp
+          image: ghcr.io/llm-d/llm-d-inference-scheduler:v0.6.0
+          args:
+            - --poolName=llama-3-1-8b-h100-premium
+            - --poolNamespace=tir-inference
+          env:
+            - name: EPP_PLUGINS_CONFIG
+              value: /etc/epp/config.yaml
+          ports:
+            - name: grpc
+              containerPort: 9002
+            - name: metrics
+              containerPort: 9090
+          volumeMounts:
+            - name: epp-config
+              mountPath: /etc/epp
+      volumes:
+        - name: epp-config
+          configMap:
+            name: epp-config-llama-premium
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: epp-llama-premium
+  namespace: tir-inference
+spec:
+  selector:
+    app: llm-d-epp
+    pool: llama-premium
+  ports:
+    - name: grpc
+      port: 9002
+      targetPort: 9002
+    - name: metrics
+      port: 9090
+      targetPort: 9090
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: epp-llama-standard
+  namespace: tir-inference
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: llm-d-epp
+      pool: llama-standard
+  template:
+    metadata:
+      labels:
+        app: llm-d-epp
+        pool: llama-standard
+    spec:
+      serviceAccountName: llm-d-epp
+      containers:
+        - name: epp
+          image: ghcr.io/llm-d/llm-d-inference-scheduler:v0.6.0
+          args:
+            - --poolName=llama-3-1-8b-a100-standard
+            - --poolNamespace=tir-inference
+          env:
+            - name: EPP_PLUGINS_CONFIG
+              value: /etc/epp/config.yaml
+          ports:
+            - name: grpc
+              containerPort: 9002
+            - name: metrics
+              containerPort: 9090
+          volumeMounts:
+            - name: epp-config
+              mountPath: /etc/epp
+      volumes:
+        - name: epp-config
+          configMap:
+            name: epp-config-llama-standard
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: epp-llama-economy
+  namespace: tir-inference
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: llm-d-epp
+      pool: llama-economy
+  template:
+    metadata:
+      labels:
+        app: llm-d-epp
+        pool: llama-economy
+    spec:
+      serviceAccountName: llm-d-epp
+      containers:
+        - name: epp
+          image: ghcr.io/llm-d/llm-d-inference-scheduler:v0.6.0
+          args:
+            - --poolName=llama-3-1-8b-l40s-economy
+            - --poolNamespace=tir-inference
+          env:
+            - name: EPP_PLUGINS_CONFIG
+              value: /etc/epp/config.yaml
+          ports:
+            - name: grpc
+              containerPort: 9002
+            - name: metrics
+              containerPort: 9090
+          volumeMounts:
+            - name: epp-config
+              mountPath: /etc/epp
+      volumes:
+        - name: epp-config
+          configMap:
+            name: epp-config-llama-economy
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: epp-llama-longctx
+  namespace: tir-inference
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: llm-d-epp
+      pool: llama-longctx
+  template:
+    metadata:
+      labels:
+        app: llm-d-epp
+        pool: llama-longctx
+    spec:
+      serviceAccountName: llm-d-epp
+      containers:
+        - name: epp
+          image: ghcr.io/llm-d/llm-d-inference-scheduler:v0.6.0
+          args:
+            - --poolName=llama-3-1-8b-h100-longctx
+            - --poolNamespace=tir-inference
+          env:
+            - name: EPP_PLUGINS_CONFIG
+              value: /etc/epp/config.yaml
+          ports:
+            - name: grpc
+              containerPort: 9002
+            - name: metrics
+              containerPort: 9090
+          volumeMounts:
+            - name: epp-config
+              mountPath: /etc/epp
+      volumes:
+        - name: epp-config
+          configMap:
+            name: epp-config-llama-longctx
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: epp-llama-lora
+  namespace: tir-inference
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: llm-d-epp
+      pool: llama-lora
+  template:
+    metadata:
+      labels:
+        app: llm-d-epp
+        pool: llama-lora
+    spec:
+      serviceAccountName: llm-d-epp
+      containers:
+        - name: epp
+          image: ghcr.io/llm-d/llm-d-inference-scheduler:v0.6.0
+          args:
+            - --poolName=llama-3-1-8b-h100-lora
+            - --poolNamespace=tir-inference
+          env:
+            - name: EPP_PLUGINS_CONFIG
+              value: /etc/epp/config.yaml
+          ports:
+            - name: grpc
+              containerPort: 9002
+            - name: metrics
+              containerPort: 9090
+          volumeMounts:
+            - name: epp-config
+              mountPath: /etc/epp
+      volumes:
+        - name: epp-config
+          configMap:
+            name: epp-config-llama-lora
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: epp-deepseek-pd
+  namespace: tir-inference
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: llm-d-epp
+      pool: deepseek-pd
+  template:
+    metadata:
+      labels:
+        app: llm-d-epp
+        pool: deepseek-pd
+    spec:
+      serviceAccountName: llm-d-epp
+      containers:
+        - name: epp
+          image: ghcr.io/llm-d/llm-d-inference-scheduler:v0.6.0
+          args:
+            - --poolName=deepseek-v3-pd
+            - --poolNamespace=tir-inference
+          env:
+            - name: EPP_PLUGINS_CONFIG
+              value: /etc/epp/pd-config.yaml
+          ports:
+            - name: grpc
+              containerPort: 9002
+            - name: metrics
+              containerPort: 9090
+          volumeMounts:
+            - name: epp-config
+              mountPath: /etc/epp
+      volumes:
+        - name: epp-config
+          configMap:
+            name: epp-config-deepseek-pd
+
+

@@ -1,0 +1,50 @@
+# PHASE 10: OBSERVABILITY
+################################################################################
+
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: epp-metrics
+  namespace: tir-inference
+  labels:
+    release: prometheus
+spec:
+  selector:
+    matchLabels:
+      app: llm-d-epp
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 15s
+
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: vllm-metrics
+  namespace: tir-inference
+  labels:
+    release: prometheus
+spec:
+  selector:
+    matchLabels:
+      app: vllm
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 15s
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: model-cache-pvc
+  namespace: tir-inference
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: sfs
+  resources:
+    requests:
+      storage: 1000Gi

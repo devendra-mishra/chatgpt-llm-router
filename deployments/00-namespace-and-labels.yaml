@@ -1,0 +1,32 @@
+################################################################################
+# PHASE 0: NAMESPACE / SHARED LABELING CONVENTIONS
+################################################################################
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: tir-inference
+  labels:
+    platform.e2e.ai/component: inference
+
+################################################################################
+# LABELING CONVENTIONS
+#
+# Node labels expected:
+#   gpu.e2e.ai/family: h100 | a100 | l40s
+#   gpu.e2e.ai/memory: "80g" | "48g"
+#   gpu.e2e.ai/interconnect: nvlink | pcie
+#   gpu.e2e.ai/cost-tier: premium | standard | economy
+#
+# Pod labels applied to serving pods:
+#   app: vllm
+#   tir.e2enetworks.com/model: <model-name>
+#   tir.e2enetworks.com/gpu-tier: h100 | a100 | l40s
+#   tir.e2enetworks.com/serving-class: premium-realtime | standard-realtime | economy-batch | long-context | lora-dedicated
+#   tir.e2enetworks.com/lora-capable: "true" | "false"
+#   tir.e2enetworks.com/context-class: standard | long
+#   tir.e2enetworks.com/fallback-from: comma-separated pool names (informational)
+################################################################################
+
+

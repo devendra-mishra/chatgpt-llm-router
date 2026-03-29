@@ -1,0 +1,473 @@
+################################################################################
+# PHASE 1: MODEL LIFECYCLE — KTHENA MANAGED BASE MODELS
+################################################################################
+
+---
+# 1A. LLAMA 3.1 8B — H100 premium realtime
+apiVersion: workload.serving.volcano.sh/v1alpha1
+kind: ModelBooster
+metadata:
+  name: llama-3-1-8b-h100-premium
+  namespace: tir-inference
+  labels:
+    tir.e2enetworks.com/model: llama-3.1-8b
+    tir.e2enetworks.com/gpu-tier: h100
+    tir.e2enetworks.com/serving-class: premium-realtime
+spec:
+  name: llama-3-1-8b-h100-premium
+  owner: tir-platform
+  backend:
+    name: llama-3-1-8b-h100-server
+    type: vLLM
+  modelURI: hf://meta-llama/Llama-3.1-8B-Instruct
+  cacheURI: pvc://model-cache-pvc/llama-3-1-8b
+  minReplicas: 2
+  maxReplicas: 12
+
+  autoscalingPolicy:
+    metrics:
+      - type: Custom
+        custom:
+          metricName: vllm_num_requests_waiting
+          target:
+            type: AverageValue
+            averageValue: "4"
+    behavior:
+      scaleUp:
+        stabilizationWindowSeconds: 30
+        policies:
+          - type: Pods
+            value: 2
+            periodSeconds: 60
+      scaleDown:
+        stabilizationWindowSeconds: 300
+        policies:
+          - type: Pods
+            value: 1
+            periodSeconds: 300
+
+  envFrom:
+    - secretRef:
+        name: hf-token
+
+  workers:
+    - type: server
+      image: vllm/vllm-openai:v0.8.3
+      replicas: 2
+      pods: 1
+      resources:
+        requests:
+          cpu: "8"
+          memory: 64Gi
+          nvidia.com/gpu: "1"
+        limits:
+          cpu: "16"
+          memory: 96Gi
+          nvidia.com/gpu: "1"
+      config:
+        served-model-name: llama-3.1-8b
+        host: "0.0.0.0"
+        port: "8000"
+        max-model-len: "8192"
+        gpu-memory-utilization: "0.92"
+        enable-prefix-caching: ""
+        disable-log-requests: ""
+      nodeSelector:
+        gpu.e2e.ai/family: h100
+      podLabels:
+        app: vllm
+        tir.e2enetworks.com/model: llama-3.1-8b
+        tir.e2enetworks.com/gpu-tier: h100
+        tir.e2enetworks.com/serving-class: premium-realtime
+        tir.e2enetworks.com/context-class: standard
+        tir.e2enetworks.com/lora-capable: "true"
+
+---
+# 1B. LLAMA 3.1 8B — A100 standard realtime
+apiVersion: workload.serving.volcano.sh/v1alpha1
+kind: ModelBooster
+metadata:
+  name: llama-3-1-8b-a100-standard
+  namespace: tir-inference
+  labels:
+    tir.e2enetworks.com/model: llama-3.1-8b
+    tir.e2enetworks.com/gpu-tier: a100
+    tir.e2enetworks.com/serving-class: standard-realtime
+spec:
+  name: llama-3-1-8b-a100-standard
+  owner: tir-platform
+  backend:
+    name: llama-3-1-8b-a100-server
+    type: vLLM
+  modelURI: hf://meta-llama/Llama-3.1-8B-Instruct
+  cacheURI: pvc://model-cache-pvc/llama-3-1-8b
+  minReplicas: 2
+  maxReplicas: 16
+
+  autoscalingPolicy:
+    metrics:
+      - type: Custom
+        custom:
+          metricName: vllm_num_requests_waiting
+          target:
+            type: AverageValue
+            averageValue: "6"
+
+  envFrom:
+    - secretRef:
+        name: hf-token
+
+  workers:
+    - type: server
+      image: vllm/vllm-openai:v0.8.3
+      replicas: 2
+      pods: 1
+      resources:
+        requests:
+          cpu: "8"
+          memory: 64Gi
+          nvidia.com/gpu: "1"
+        limits:
+          cpu: "16"
+          memory: 96Gi
+          nvidia.com/gpu: "1"
+      config:
+        served-model-name: llama-3.1-8b
+        host: "0.0.0.0"
+        port: "8000"
+        max-model-len: "8192"
+        gpu-memory-utilization: "0.90"
+        enable-prefix-caching: ""
+      nodeSelector:
+        gpu.e2e.ai/family: a100
+      podLabels:
+        app: vllm
+        tir.e2enetworks.com/model: llama-3.1-8b
+        tir.e2enetworks.com/gpu-tier: a100
+        tir.e2enetworks.com/serving-class: standard-realtime
+        tir.e2enetworks.com/context-class: standard
+        tir.e2enetworks.com/lora-capable: "true"
+
+---
+# 1C. LLAMA 3.1 8B — L40S economy batch / overflow
+apiVersion: workload.serving.volcano.sh/v1alpha1
+kind: ModelBooster
+metadata:
+  name: llama-3-1-8b-l40s-economy
+  namespace: tir-inference
+  labels:
+    tir.e2enetworks.com/model: llama-3.1-8b
+    tir.e2enetworks.com/gpu-tier: l40s
+    tir.e2enetworks.com/serving-class: economy-batch
+spec:
+  name: llama-3-1-8b-l40s-economy
+  owner: tir-platform
+  backend:
+    name: llama-3-1-8b-l40s-server
+    type: vLLM
+  modelURI: hf://meta-llama/Llama-3.1-8B-Instruct
+  cacheURI: pvc://model-cache-pvc/llama-3-1-8b
+  minReplicas: 1
+  maxReplicas: 20
+
+  autoscalingPolicy:
+    metrics:
+      - type: Custom
+        custom:
+          metricName: vllm_num_requests_waiting
+          target:
+            type: AverageValue
+            averageValue: "12"
+
+  envFrom:
+    - secretRef:
+        name: hf-token
+
+  workers:
+    - type: server
+      image: vllm/vllm-openai:v0.8.3
+      replicas: 1
+      pods: 1
+      resources:
+        requests:
+          cpu: "6"
+          memory: 48Gi
+          nvidia.com/gpu: "1"
+        limits:
+          cpu: "12"
+          memory: 64Gi
+          nvidia.com/gpu: "1"
+      config:
+        served-model-name: llama-3.1-8b
+        host: "0.0.0.0"
+        port: "8000"
+        max-model-len: "4096"
+        gpu-memory-utilization: "0.88"
+        enable-prefix-caching: ""
+      nodeSelector:
+        gpu.e2e.ai/family: l40s
+      podLabels:
+        app: vllm
+        tir.e2enetworks.com/model: llama-3.1-8b
+        tir.e2enetworks.com/gpu-tier: l40s
+        tir.e2enetworks.com/serving-class: economy-batch
+        tir.e2enetworks.com/context-class: standard
+        tir.e2enetworks.com/lora-capable: "false"
+
+---
+# 1D. LLAMA 3.1 8B — H100 long-context lane
+apiVersion: workload.serving.volcano.sh/v1alpha1
+kind: ModelBooster
+metadata:
+  name: llama-3-1-8b-h100-longctx
+  namespace: tir-inference
+  labels:
+    tir.e2enetworks.com/model: llama-3.1-8b
+    tir.e2enetworks.com/gpu-tier: h100
+    tir.e2enetworks.com/serving-class: long-context
+spec:
+  name: llama-3-1-8b-h100-longctx
+  owner: tir-platform
+  backend:
+    name: llama-3-1-8b-h100-longctx-server
+    type: vLLM
+  modelURI: hf://meta-llama/Llama-3.1-8B-Instruct
+  cacheURI: pvc://model-cache-pvc/llama-3-1-8b
+  minReplicas: 1
+  maxReplicas: 8
+
+  autoscalingPolicy:
+    metrics:
+      - type: Custom
+        custom:
+          metricName: vllm_num_requests_waiting
+          target:
+            type: AverageValue
+            averageValue: "3"
+
+  envFrom:
+    - secretRef:
+        name: hf-token
+
+  workers:
+    - type: server
+      image: vllm/vllm-openai:v0.8.3
+      replicas: 1
+      pods: 1
+      resources:
+        requests:
+          cpu: "12"
+          memory: 96Gi
+          nvidia.com/gpu: "1"
+        limits:
+          cpu: "24"
+          memory: 128Gi
+          nvidia.com/gpu: "1"
+      config:
+        served-model-name: llama-3.1-8b
+        host: "0.0.0.0"
+        port: "8000"
+        max-model-len: "32768"
+        gpu-memory-utilization: "0.94"
+        enable-prefix-caching: ""
+      nodeSelector:
+        gpu.e2e.ai/family: h100
+      podLabels:
+        app: vllm
+        tir.e2enetworks.com/model: llama-3.1-8b
+        tir.e2enetworks.com/gpu-tier: h100
+        tir.e2enetworks.com/serving-class: long-context
+        tir.e2enetworks.com/context-class: long
+        tir.e2enetworks.com/lora-capable: "true"
+
+---
+# 1E. LLAMA 3.1 8B — H100 dedicated LoRA lane
+apiVersion: workload.serving.volcano.sh/v1alpha1
+kind: ModelBooster
+metadata:
+  name: llama-3-1-8b-h100-lora
+  namespace: tir-inference
+  labels:
+    tir.e2enetworks.com/model: llama-3.1-8b
+    tir.e2enetworks.com/gpu-tier: h100
+    tir.e2enetworks.com/serving-class: lora-dedicated
+spec:
+  name: llama-3-1-8b-h100-lora
+  owner: tir-platform
+  backend:
+    name: llama-3-1-8b-h100-lora-server
+    type: vLLM
+  modelURI: hf://meta-llama/Llama-3.1-8B-Instruct
+  cacheURI: pvc://model-cache-pvc/llama-3-1-8b
+  minReplicas: 1
+  maxReplicas: 10
+
+  envFrom:
+    - secretRef:
+        name: hf-token
+
+  workers:
+    - type: server
+      image: vllm/vllm-openai:v0.8.3
+      replicas: 1
+      pods: 1
+      resources:
+        requests:
+          cpu: "12"
+          memory: 96Gi
+          nvidia.com/gpu: "1"
+        limits:
+          cpu: "24"
+          memory: 128Gi
+          nvidia.com/gpu: "1"
+      config:
+        served-model-name: llama-3.1-8b
+        host: "0.0.0.0"
+        port: "8000"
+        max-model-len: "8192"
+        gpu-memory-utilization: "0.92"
+        enable-prefix-caching: ""
+      nodeSelector:
+        gpu.e2e.ai/family: h100
+      podLabels:
+        app: vllm
+        tir.e2enetworks.com/model: llama-3.1-8b
+        tir.e2enetworks.com/gpu-tier: h100
+        tir.e2enetworks.com/serving-class: lora-dedicated
+        tir.e2enetworks.com/context-class: standard
+        tir.e2enetworks.com/lora-capable: "true"
+
+  # Example LoRA adapters Kthena should hot-load / pin
+  loraAdapters:
+    - name: customer-support-v2
+      adapterURI: hf://my-org/customer-support-lora-v2
+      weight: 1
+    - name: legal-assistant-v1
+      adapterURI: hf://my-org/legal-assistant-v1
+      weight: 1
+
+
+################################################################################
+# PHASE 1B: LARGE MODEL WITH PREFILL / DECODE DISAGGREGATION
+################################################################################
+
+---
+apiVersion: workload.serving.volcano.sh/v1alpha1
+kind: ModelServing
+metadata:
+  name: deepseek-v3-h100-a100-pd
+  namespace: tir-inference
+  labels:
+    tir.e2enetworks.com/model: deepseek-v3
+spec:
+  schedulerName: volcano
+  replicas: 1
+
+  template:
+    restartGracePeriodSeconds: 180
+    gangPolicy:
+      minRoleReplicas:
+        prefill: 2
+        decode: 4
+    topologyPolicy:
+      hyperNode: true
+
+    roles:
+      - name: prefill
+        replicas: 2
+        entryTemplate:
+          metadata:
+            labels:
+              app: vllm
+              tir.e2enetworks.com/model: deepseek-v3
+              tir.e2enetworks.com/gpu-tier: h100
+              tir.e2enetworks.com/serving-class: premium-realtime
+              tir.e2enetworks.com/context-class: long
+              tir.e2enetworks.com/lora-capable: "false"
+              llm-d.ai/role: prefill
+          spec:
+            nodeSelector:
+              gpu.e2e.ai/family: h100
+            containers:
+              - name: vllm-prefill
+                image: vllm/vllm-openai:v0.8.3
+                command: ["python3", "-m", "vllm.entrypoints.openai.api_server"]
+                args:
+                  - "--model"
+                  - "deepseek-ai/DeepSeek-V3"
+                  - "--served-model-name"
+                  - "deepseek-v3"
+                  - "--port"
+                  - "8000"
+                  - "--tensor-parallel-size"
+                  - "4"
+                  - "--max-model-len"
+                  - "32768"
+                  - "--gpu-memory-utilization"
+                  - "0.94"
+                env:
+                  - name: HUGGING_FACE_HUB_TOKEN
+                    valueFrom:
+                      secretKeyRef:
+                        name: hf-token
+                        key: token
+                resources:
+                  requests:
+                    cpu: "16"
+                    memory: 256Gi
+                    nvidia.com/gpu: "4"
+                  limits:
+                    cpu: "32"
+                    memory: 256Gi
+                    nvidia.com/gpu: "4"
+
+      - name: decode
+        replicas: 4
+        entryTemplate:
+          metadata:
+            labels:
+              app: vllm
+              tir.e2enetworks.com/model: deepseek-v3
+              tir.e2enetworks.com/gpu-tier: a100
+              tir.e2enetworks.com/serving-class: premium-realtime
+              tir.e2enetworks.com/context-class: long
+              tir.e2enetworks.com/lora-capable: "false"
+              llm-d.ai/role: decode
+          spec:
+            nodeSelector:
+              gpu.e2e.ai/family: a100
+            containers:
+              - name: vllm-decode
+                image: vllm/vllm-openai:v0.8.3
+                command: ["python3", "-m", "vllm.entrypoints.openai.api_server"]
+                args:
+                  - "--model"
+                  - "deepseek-ai/DeepSeek-V3"
+                  - "--served-model-name"
+                  - "deepseek-v3"
+                  - "--port"
+                  - "8000"
+                  - "--tensor-parallel-size"
+                  - "2"
+                  - "--max-model-len"
+                  - "32768"
+                  - "--gpu-memory-utilization"
+                  - "0.92"
+                env:
+                  - name: HUGGING_FACE_HUB_TOKEN
+                    valueFrom:
+                      secretKeyRef:
+                        name: hf-token
+                        key: token
+                resources:
+                  requests:
+                    cpu: "8"
+                    memory: 128Gi
+                    nvidia.com/gpu: "2"
+                  limits:
+                    cpu: "16"
+                    memory: 128Gi
+                    nvidia.com/gpu: "2"
+
+
+################################################################################

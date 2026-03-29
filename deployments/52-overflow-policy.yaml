@@ -1,0 +1,63 @@
+# PHASE 8: FALLBACK / OVERFLOW POLICY
+################################################################################
+
+---
+# Overflow rules are best implemented in the request-classifier or ext-auth layer.
+# It should rewrite x-serving-class based on health/load/SLO and allowed downgrade policy.
+#
+# Suggested policy:
+# 1. long-context always stays in long-context lane unless explicit downgrade allowed
+# 2. lora-dedicated stays in lora lane if adapter is pinned/hot
+# 3. premium -> fallback to standard only if:
+#      - x-overflow-allowed=true
+#      - premium pool queue depth > threshold
+#      - no healthy H100 endpoint
+# 4. standard -> fallback to economy if:
+#      - async/batch or non-strict-latency
+# 5. never overflow LoRA traffic to non-lora-capable pods
+#
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tir-routing-policy
+  namespace: tir-inference
+data:
+  policy.yaml: |
+    routingPolicy:
+      defaults:
+        overflowAllowedHeader: x-overflow-allowed
+        strictLatencyHeader: x-strict-latency
+      classes:
+        premium-realtime:
+          primaryPool: llama-3-1-8b-h100-premium
+          fallbackPools:
+            - llama-3-1-8b-a100-standard
+          overflowConditions:
+            maxQueueDepth: 12
+            minHealthyEndpoints: 1
+        standard-realtime:
+          primaryPool: llama-3-1-8b-a100-standard
+          fallbackPools:
+            - llama-3-1-8b-l40s-economy
+          overflowConditions:
+            maxQueueDepth: 20
+            minHealthyEndpoints: 1
+        economy-batch:
+          primaryPool: llama-3-1-8b-l40s-economy
+          fallbackPools: []
+        long-context:
+          primaryPool: llama-3-1-8b-h100-longctx
+          fallbackPools:
+            - llama-3-1-8b-h100-premium
+          overflowConditions:
+            maxQueueDepth: 6
+            minHealthyEndpoints: 1
+        lora-dedicated:
+          primaryPool: llama-3-1-8b-h100-lora
+          fallbackPools: []
+          constraints:
+            requireLoraCapable: true
+            requireAdapterHotOrLoadable: true
+
+
+################################################################################

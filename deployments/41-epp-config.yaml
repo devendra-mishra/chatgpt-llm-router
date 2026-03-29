@@ -1,0 +1,165 @@
+################################################################################
+# PHASE 5: EPP SCORING / FALLBACK / OVERFLOW CONFIG
+################################################################################
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: epp-config-llama-premium
+  namespace: tir-inference
+data:
+  config.yaml: |
+    apiVersion: inference.networking.x-k8s.io/v1alpha1
+    kind: EndpointPickerConfig
+    plugins:
+      - type: queue-scorer
+      - type: kv-cache-utilization-scorer
+      - type: prefix-cache-scorer
+        parameters:
+          maxPrefixBlocksToMatch: 512
+          lruCapacityPerServer: 62500
+      - type: max-score-picker
+    schedulingProfiles:
+      - name: default
+        plugins:
+          - pluginRef: queue-scorer
+            weight: 2
+          - pluginRef: kv-cache-utilization-scorer
+            weight: 2
+          - pluginRef: prefix-cache-scorer
+            weight: 2
+          - pluginRef: max-score-picker
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: epp-config-llama-standard
+  namespace: tir-inference
+data:
+  config.yaml: |
+    apiVersion: inference.networking.x-k8s.io/v1alpha1
+    kind: EndpointPickerConfig
+    plugins:
+      - type: queue-scorer
+      - type: kv-cache-utilization-scorer
+      - type: prefix-cache-scorer
+      - type: max-score-picker
+    schedulingProfiles:
+      - name: default
+        plugins:
+          - pluginRef: queue-scorer
+            weight: 3
+          - pluginRef: kv-cache-utilization-scorer
+            weight: 2
+          - pluginRef: prefix-cache-scorer
+            weight: 1
+          - pluginRef: max-score-picker
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: epp-config-llama-economy
+  namespace: tir-inference
+data:
+  config.yaml: |
+    apiVersion: inference.networking.x-k8s.io/v1alpha1
+    kind: EndpointPickerConfig
+    plugins:
+      - type: queue-scorer
+      - type: max-score-picker
+    schedulingProfiles:
+      - name: default
+        plugins:
+          - pluginRef: queue-scorer
+            weight: 5
+          - pluginRef: max-score-picker
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: epp-config-llama-longctx
+  namespace: tir-inference
+data:
+  config.yaml: |
+    apiVersion: inference.networking.x-k8s.io/v1alpha1
+    kind: EndpointPickerConfig
+    plugins:
+      - type: kv-cache-utilization-scorer
+      - type: prefix-cache-scorer
+        parameters:
+          maxPrefixBlocksToMatch: 1024
+          lruCapacityPerServer: 125000
+      - type: queue-scorer
+      - type: max-score-picker
+    schedulingProfiles:
+      - name: default
+        plugins:
+          - pluginRef: kv-cache-utilization-scorer
+            weight: 3
+          - pluginRef: prefix-cache-scorer
+            weight: 3
+          - pluginRef: queue-scorer
+            weight: 1
+          - pluginRef: max-score-picker
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: epp-config-llama-lora
+  namespace: tir-inference
+data:
+  config.yaml: |
+    apiVersion: inference.networking.x-k8s.io/v1alpha1
+    kind: EndpointPickerConfig
+    plugins:
+      - type: queue-scorer
+      - type: kv-cache-utilization-scorer
+      - type: prefix-cache-scorer
+      # Custom / conceptual plugin:
+      # favors pods where requested adapter is already loaded/hot
+      - type: lora-affinity-scorer
+      - type: max-score-picker
+    schedulingProfiles:
+      - name: default
+        plugins:
+          - pluginRef: lora-affinity-scorer
+            weight: 4
+          - pluginRef: prefix-cache-scorer
+            weight: 2
+          - pluginRef: kv-cache-utilization-scorer
+            weight: 2
+          - pluginRef: queue-scorer
+            weight: 1
+          - pluginRef: max-score-picker
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: epp-config-deepseek-pd
+  namespace: tir-inference
+data:
+  pd-config.yaml: |
+    apiVersion: inference.networking.x-k8s.io/v1alpha1
+    kind: EndpointPickerConfig
+    featureGates:
+      - prepareDataPlugins
+    plugins:
+      - type: prefill-header-handler
+      - type: prefix-based-pd-decider
+        parameters:
+          nonCachedTokens: 16
+      - type: prefix-cache-scorer
+      - type: queue-scorer
+      - type: prefill-filter
+      - type: decode-filter
+      - type: pd-profile-handler
+      - type: max-score-picker
+
+
+################################################################################

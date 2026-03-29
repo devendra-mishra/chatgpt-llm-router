@@ -1,0 +1,23 @@
+# PHASE 9: RATE LIMITING BY TIER
+################################################################################
+
+---
+apiVersion: gateway.kgateway.dev/v1alpha1
+kind: TrafficPolicy
+metadata:
+  name: tir-rate-limit
+  namespace: tir-inference
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: tir-inference-gateway
+  rateLimit:
+    local:
+      tokenBucket:
+        maxTokens: 300
+        tokensPerFill: 300
+        fillInterval: "60s"
+
+
+################################################################################

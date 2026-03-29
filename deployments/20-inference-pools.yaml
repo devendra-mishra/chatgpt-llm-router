@@ -1,0 +1,113 @@
+# PHASE 2: INFERENCE POOLS — SPLIT BY MODEL + GPU TIER + SERVING CLASS
+################################################################################
+
+---
+apiVersion: inference.networking.x-k8s.io/v1alpha2
+kind: InferencePool
+metadata:
+  name: llama-3-1-8b-h100-premium
+  namespace: tir-inference
+  labels:
+    tir.e2enetworks.com/fallback-priority: "100"
+spec:
+  targetPortNumber: 8000
+  selector:
+    matchLabels:
+      app: vllm
+      tir.e2enetworks.com/model: llama-3.1-8b
+      tir.e2enetworks.com/gpu-tier: h100
+      tir.e2enetworks.com/serving-class: premium-realtime
+  extensionRef:
+    name: epp-llama-premium
+
+---
+apiVersion: inference.networking.x-k8s.io/v1alpha2
+kind: InferencePool
+metadata:
+  name: llama-3-1-8b-a100-standard
+  namespace: tir-inference
+  labels:
+    tir.e2enetworks.com/fallback-priority: "80"
+spec:
+  targetPortNumber: 8000
+  selector:
+    matchLabels:
+      app: vllm
+      tir.e2enetworks.com/model: llama-3.1-8b
+      tir.e2enetworks.com/gpu-tier: a100
+      tir.e2enetworks.com/serving-class: standard-realtime
+  extensionRef:
+    name: epp-llama-standard
+
+---
+apiVersion: inference.networking.x-k8s.io/v1alpha2
+kind: InferencePool
+metadata:
+  name: llama-3-1-8b-l40s-economy
+  namespace: tir-inference
+  labels:
+    tir.e2enetworks.com/fallback-priority: "50"
+spec:
+  targetPortNumber: 8000
+  selector:
+    matchLabels:
+      app: vllm
+      tir.e2enetworks.com/model: llama-3.1-8b
+      tir.e2enetworks.com/gpu-tier: l40s
+      tir.e2enetworks.com/serving-class: economy-batch
+  extensionRef:
+    name: epp-llama-economy
+
+---
+apiVersion: inference.networking.x-k8s.io/v1alpha2
+kind: InferencePool
+metadata:
+  name: llama-3-1-8b-h100-longctx
+  namespace: tir-inference
+spec:
+  targetPortNumber: 8000
+  selector:
+    matchLabels:
+      app: vllm
+      tir.e2enetworks.com/model: llama-3.1-8b
+      tir.e2enetworks.com/gpu-tier: h100
+      tir.e2enetworks.com/serving-class: long-context
+      tir.e2enetworks.com/context-class: long
+  extensionRef:
+    name: epp-llama-longctx
+
+---
+apiVersion: inference.networking.x-k8s.io/v1alpha2
+kind: InferencePool
+metadata:
+  name: llama-3-1-8b-h100-lora
+  namespace: tir-inference
+spec:
+  targetPortNumber: 8000
+  selector:
+    matchLabels:
+      app: vllm
+      tir.e2enetworks.com/model: llama-3.1-8b
+      tir.e2enetworks.com/gpu-tier: h100
+      tir.e2enetworks.com/serving-class: lora-dedicated
+      tir.e2enetworks.com/lora-capable: "true"
+  extensionRef:
+    name: epp-llama-lora
+
+---
+apiVersion: inference.networking.x-k8s.io/v1alpha2
+kind: InferencePool
+metadata:
+  name: deepseek-v3-pd
+  namespace: tir-inference
+spec:
+  targetPortNumber: 8000
+  selector:
+    matchLabels:
+      app: vllm
+      tir.e2enetworks.com/model: deepseek-v3
+  extensionRef:
+    name: epp-deepseek-pd
+
+
+################################################################################

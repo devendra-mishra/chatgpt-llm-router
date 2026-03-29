@@ -1,0 +1,129 @@
+# PHASE 6: KGATEWAY — AUTH + REQUEST CLASSIFICATION HEADERS
+################################################################################
+
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: tir-inference-gateway
+  namespace: tir-inference
+spec:
+  gatewayClassName: kgateway
+  listeners:
+    - name: https
+      port: 443
+      protocol: HTTPS
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - name: tir-inference-tls
+
+---
+apiVersion: gateway.kgateway.dev/v1alpha1
+kind: TrafficPolicy
+metadata:
+  name: tir-jwt-auth
+  namespace: tir-inference
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: tir-inference-gateway
+  jwtAuth:
+    providers:
+      - name: tir-iam
+        issuer: "https://auth.e2enetworks.com"
+        audiences:
+          - "tir-inference-api"
+        jwks:
+          remoteJWKS:
+            url: "https://auth.e2enetworks.com/.well-known/jwks.json"
+            cacheDuration: "300s"
+        claimToHeaders:
+          - claim: "sub"
+            header: "x-user-id"
+          - claim: "team_id"
+            header: "x-team-id"
+          - claim: "project_id"
+            header: "x-project-id"
+          - claim: "tier"
+            header: "x-user-tier"
+        tokenSource:
+          - headerSource:
+              name: "Authorization"
+              prefix: "Bearer "
+
+---
+apiVersion: gateway.kgateway.dev/v1alpha1
+kind: GatewayExtension
+metadata:
+  name: tir-ext-auth
+  namespace: tir-inference
+spec:
+  type: ExtAuth
+  extAuth:
+    failOpen: false
+    grpcService:
+      backendRef:
+        name: tir-auth-service
+        port: 9001
+
+---
+apiVersion: gateway.kgateway.dev/v1alpha1
+kind: TrafficPolicy
+metadata:
+  name: tir-ext-auth-policy
+  namespace: tir-inference
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: tir-inference-gateway
+  extAuth:
+    extensionRef:
+      name: tir-ext-auth
+
+---
+# Request classifier:
+# This component should inspect request body / headers and set:
+#   x-inference-model
+#   x-serving-class
+#   x-context-class
+#   x-lora-adapter
+#   x-overflow-allowed
+#
+# Examples:
+# - prompt_tokens > 12000             => x-context-class: long
+# - adapter present                   => x-serving-class: lora-dedicated
+# - paid tier with low-latency flag   => x-serving-class: premium-realtime
+# - batch async requests              => x-serving-class: economy-batch
+apiVersion: gateway.kgateway.dev/v1alpha1
+kind: GatewayExtension
+metadata:
+  name: tir-request-classifier
+  namespace: tir-inference
+spec:
+  type: ExtProc
+  extProc:
+    grpcService:
+      backendRef:
+        name: tir-request-classifier
+        port: 9003
+
+---
+apiVersion: gateway.kgateway.dev/v1alpha1
+kind: TrafficPolicy
+metadata:
+  name: tir-request-classifier-policy
+  namespace: tir-inference
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: tir-inference-gateway
+  extProc:
+    extensionRef:
+      name: tir-request-classifier
+
+
+################################################################################

@@ -1,0 +1,15 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - 00-namespace-and-labels.yaml
+  - 10-model-lifecycle.yaml
+  - 20-inference-pools.yaml
+  - 30-inference-models.yaml
+  - 41-epp-config.yaml
+  - 40-epp-deployments.yaml
+  - 50-gateway-auth-classifier.yaml
+  - 51-routing.yaml
+  - 52-overflow-policy.yaml
+  - 53-rate-limit.yaml
+  - 60-observability-and-storage.yaml
